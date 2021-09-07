@@ -162,7 +162,7 @@ MODULE posthf_mod
               xQ(nksym), wQ(nksym) )
 
     ! generate QMCPACK maps between {Ka, Kb} <--> {Q=(Ka-Kb)+G, K=Ka}
-    CALL calculate_Qpt_map(nksym,xksym,Qpts,QKtoK2,kminus,nq1,nq2,nq3)
+    CALL calculate_Qpt_map(nksym,xksym,Qpts,QKtoK2,kminus,nq1,nq2,nq3,use_regularization)
     !
     if(use_regularization) then
       ! find nqX, call 
