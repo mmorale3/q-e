@@ -123,7 +123,7 @@ END SUBROUTINE calculate_phase_factor
   !  for a given {Q, K}, the corresponding pairs is then given by: {K,
   !  QKtoK2(Q,K)} generate Qpts grid
   !-----------------------------------------------------------------------
-  SUBROUTINE calculate_Qpt_map(nk,xk,Qpts,QKtoK2,kminus,nq1,nq2,nq3)
+  SUBROUTINE calculate_Qpt_map(nk,xk,Qpts,QKtoK2,kminus,nq1,nq2,nq3,use_regularization)
   !-----------------------------------------------------------------------
     !
     USE KINDS, ONLY : DP
@@ -133,6 +133,7 @@ END SUBROUTINE calculate_phase_factor
     !
     INTEGER,   INTENT(IN)   :: nk
     REAL(DP),  INTENT(IN)   :: xk(3,nk)
+    LOGICAL,   INTENT(IN)   :: use_regularization
     REAL(DP),  INTENT(OUT)  :: Qpts(3,nk)
     INTEGER,   INTENT(OUT)  :: QKtoK2(nk,nk)
     INTEGER,   INTENT(OUT)  :: kminus(nk)
@@ -194,7 +195,7 @@ END SUBROUTINE calculate_phase_factor
       if( kminus( kminus(ik) ) .ne. ik ) &
         call errore('pw2qmcpack',' Error in Q(-Q) map.',14)
     enddo
-    ! find dimensions of Q-grid
+    if (use_regularization) then! find dimensions of Q-grid
     ! MAM: is this generic?
     if( (nq1==0) .or. (nq2==0) .or. (nq3==0) ) then
       nq1=0
@@ -211,6 +212,7 @@ END SUBROUTINE calculate_phase_factor
     write(*,*) ' Dimensions of the Q-point grid: ',nq1,nq2,nq3
     if( nq1*nq2*nq3 .ne. nk ) & 
       call errore('calculate_Qpt_map','Problems with Qpoint grid. nq1*nq2*nq3 ne nk',1)
+    endif ! dimension of Q-grid
   END SUBROUTINE calculate_Qpt_map
  !
   !-----------------------------------------------------------------------
