@@ -399,7 +399,7 @@ subroutine pyscf_driver_mp2(out_prefix_,diag,diag_type,nread_from_h5, &
         call errore('pyscf_driver','grid_type ne 1',1)
 
       ! mp2 now requires Overlap matrix between basis and KS/HF states
-      call get_nelmax(nbnd,nksym,numspin,wk,size(wk,1),wg,nelmax)
+      call get_nelmax(nbnd,nksym,numspin,wk,size(wg,1),wg,nelmax)
       maxnorb = maxval(h5id_orbs%norbK(:))
       write(*,*)'maxnorb, nelmax:',maxnorb, nelmax
       allocate( M(maxnorb,nelmax,nksym,min(2,nspin)) )
@@ -567,7 +567,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
 
     ! calculates expansion of occupied KS states in the generated  
     ! (spin-independent) basis and writes trial wfn to file
-    call get_nelmax(nbnd,nksym,numspin,wk,size(wk,1),wg,nelmax)
+    call get_nelmax(nbnd,nksym,numspin,wk,size(wg,1),wg,nelmax)
     maxnorb = maxval(h5id_orbs%norbK(:))
     allocate( M(maxnorb,nelmax,nksym,min(2,nspin)) )
     if(npool > 1) then 

@@ -325,7 +325,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
 
       ! calculates expansion of occupied KS states in the generated  
       ! (spin-independent) basis and writes trial wfn to file
-      call get_nelmax(nbnd,nksym,numspin,wk,size(wk,1),wg,nelmax)  
+      call get_nelmax(nbnd,nksym,numspin,wk,size(wg,1),wg,nelmax)  
       maxnorb = maxval(h5id_input_orbs%norbK(:))  
       write(*,*)'maxnorb, nelmax:',maxnorb, nelmax
       allocate( M(maxnorb,nelmax,nksym,min(2,nspin)) )
