@@ -8,7 +8,7 @@ set(src_posthf
     src/pyscf_driver.f90
     src/posthf_module.f90
    )
-qe_enable_cuda_fortran("{src_posthf}")
+qe_enable_cuda_fortran("${src_posthf}")
 
 qe_add_library(esh5_c src/esh5_interfaces_posthf.c)  
 target_link_libraries(esh5_c
@@ -25,7 +25,14 @@ target_link_libraries(qe_posthf
         qe_upflib
         qe_lax
         qe_xclib
+	qe_devxlib
 	esh5_c)
+
+if(QE_ENABLE_CUDA)
+    target_link_libraries(qe_posthf
+        PRIVATE
+            CUDA::cublas)
+endif()
 
 ###########################################################
 
@@ -34,6 +41,7 @@ target_link_libraries(qe_posthf
 # posthf
 ###########################################################
 set(src_posthf_x src/posthf.f90)
+qe_enable_cuda_fortran("${src_posthf_x}")
 qe_add_executable(qe_posthf_exe ${src_posthf_x})
 set_target_properties(qe_posthf_exe PROPERTIES OUTPUT_NAME posthf.x)
 target_link_libraries(qe_posthf_exe
@@ -44,8 +52,15 @@ target_link_libraries(qe_posthf_exe
         qe_fftx
         qe_upflib
         qe_xclib
+	qe_devxlib
 	esh5_c
 	qe_posthf)
+
+if(QE_ENABLE_CUDA)
+    target_link_libraries(qe_posthf_exe
+        PRIVATE
+            CUDA::cublas)
+endif()
 
 ###########################################################
 

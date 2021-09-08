@@ -554,7 +554,7 @@ MODULE mp2_module
     !
     USE cublas
     USE cudafor
-    USE device_util_m,           ONLY: dev_memcpy, dev_memset
+    USE device_memcpy_m,  ONLY : dev_memcpy, dev_memset
     !
     IMPLICIT NONE
     !

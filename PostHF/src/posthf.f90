@@ -155,7 +155,7 @@ PROGRAM posthf
        low_memory, verbose, debug)
   !
 #else
-#error HDF5 flag neither enabled during configure nor added manually in make.inc
+!#error HDF5 flag neither enabled during configure nor added manually in make.inc
   CALL errore('posthf', ' HDF5 flag not enabled during configure',1)
 #endif
   CALL environment_end ( 'posthf' )

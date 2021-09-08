@@ -1546,7 +1546,7 @@ MODULE twobody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: vCoulG_d(:) 
     COMPLEX(DP), ALLOCATABLE :: SCFOrbMat(:,:)
     COMPLEX(DP), ALLOCATABLE :: psi_scf(:,:)
-    attributes(device) :: Psi_d,psic_d,psib_d,Kib_d,Fm_d,nl_d,vCoulG_d
+    attributes(DEVICE) :: Psi_d,psic_d,psib_d,Kib_d,Fm_d,nl_d,vCoulG_d
     !
     type(cublasHandle) :: handle_cublas
     integer :: istat
