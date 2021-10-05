@@ -5,6 +5,7 @@ set(src_posthf
     src/orbital_generators.f90
     src/onebody_hamiltonian.f90
     src/mp2_module.f90
+    src/rpa_module.f90
     src/pyscf_driver.f90
     src/posthf_module.f90
    )

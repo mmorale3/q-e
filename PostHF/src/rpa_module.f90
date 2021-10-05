@@ -45,11 +45,8 @@ MODULE rpa_module
   !
   CONTAINS
   !
-  ! hamil_esh5 must contain Cholesky matrix, eigenvalues and mf density matrix 
-  ! right now assumes a HF reference. Generalize to DFT reference with singles
-  !    term later
-  ! 
-  SUBROUTINE rpa(edrpa,dfft,hamil_esh5,esosex) 
+  !
+  SUBROUTINE rpa_cholesky(edrpa,dfft,hamil_esh5,esosex) 
     !
     USE parallel_include
     USE wvfct, ONLY: wg, et
@@ -67,15 +64,15 @@ MODULE rpa_module
     TYPE(h5file_type) :: h5id_hamil
     !
     LOGICAL :: get_sosex
-    INTEGER :: iq, Q, ka, ki, ia, ii, ispin, ik, ikk, iw, iwQ 
+    INTEGER :: i, n, iq, Q, ka, ki, ia, ii, ispin, ik, ikk, iw, iwQ 
     INTEGER :: P_beg, P_end, Q_beg, Q_end, Naux, nP, nQ
-    INTEGER :: k_beg, k_end, nkloc, nia_max
-    INTEGER :: nfreq, nQuniq, maxnorbs
+    INTEGER :: k_beg, k_end, nkloc, nia_max, ierror
+    INTEGER :: nfreq, nQuniq, maxnorb, nchol_max
     !
     INTEGER :: nel(2), maxocc, maxvir
     INTEGER, ALLOCATABLE :: noccK(:,:), nvirK(:,:)
     INTEGER, ALLOCATABLE :: norbK(:), ncholQ(:)
-    REAL(DP), ALLOCATABLE :: weight(:,:,:),eigval(:,:,:)
+    REAL(DP), ALLOCATABLE :: weight(:,:),eigval(:,:)
     COMPLEX(DP), ALLOCATABLE :: Qpq(:,:,:) ! Q matrix 
     COMPLEX(DP), ALLOCATABLE :: Ypq(:,:,:) ! Y matrix 
     COMPLEX(DP), ALLOCATABLE :: MOs(:,:,:) ! Matrix of MO coefficients  
@@ -87,20 +84,25 @@ MODULE rpa_module
     COMPLEX(DP), ALLOCATABLE :: Ria(:,:) ! right hand side of MO Cholesky matrix 
     COMPLEX(DP), ALLOCATABLE :: xfreq(:), wfreq(:)
 
+    ! rpa with cholesky not yet implemented!
+    call errore('rpa','error rpa_cholesky not yet implemented.',1)
+    ! 
+    
     get_sosex = present(esosex)
+    get_sosex = .false.  ! turn off for now
     CALL esh5_posthf_open_file_read(h5id_hamil%id,TRIM(hamil_esh5),  &
-                                                  LEN_TRIM(hamil_esh5),error)
-    if(error .ne. 0 ) &
+                                                  LEN_TRIM(hamil_esh5),ierror)
+    if(ierror .ne. 0 ) &
       call errore('rpa','error opening hamil file',1)
 
-    maxnorbs = h5id_hamil%maxnorbs 
-    allocate( MOs(maxnorbs, maxnorbs, 2), ncholQ(nksym), norbK(nksym) )
+    maxnorb = h5id_hamil%maxnorb 
+    allocate( MOs(maxnorb, maxnorb, 2), ncholQ(nksym), norbK(nksym) )
 
-    call esh5_posthf_read_nchol(h5id_hamil%id,ncholQ, error)
-    if(error .ne. 0) call errore('rpa','Error: esh5_posthf_read_nchol',error)
+    call esh5_posthf_read_nchol(h5id_hamil%id,ncholQ, ierror)
+    if(ierror .ne. 0) call errore('rpa','Error: esh5_posthf_read_nchol',ierror)
     nchol_max = maxval(ncholQ(:))
-    call esh5_posthf_read_norbk(h5id_hamil%id,norbK, error)
-    if(error .ne. 0) call errore('rpa','Error: esh5_posthf_read_norbk',error)
+    call esh5_posthf_read_norbk(h5id_hamil%id,norbK, ierror)
+    if(ierror .ne. 0) call errore('rpa','Error: esh5_posthf_read_norbk',ierror)
 
     !  Partition k-points among MPI tasks
     call fair_divide(k_beg,k_end,my_pool_id+1,npool,nksym)
@@ -122,8 +124,8 @@ MODULE rpa_module
       do ik=1,nksym
         ikk = ik + nksym*(ispin-1)
         call esh5_posthf_read_et(h5id_hamil%id,ikk-1,eigval(1,ikk), &
-                               weight(1,ikk),error)
-        if(error .ne. 0 ) &
+                               weight(1,ikk),ierror)
+        if(ierror .ne. 0 ) &
           call errore('mp2_g','error reading weights',1)
       enddo
     enddo
@@ -159,7 +161,7 @@ MODULE rpa_module
 
     ! 3. Loop over Q and frequency 
     edrpa = (0.d0,0.d0)
-    if(get_sosex) esosex=(0.d0,0.d0)
+!    if(get_sosex) esosex=(0.d0,0.d0)
     Qpq(:,:,:) = (0.d0,0.d0)
     iwQ=0
     do iw = 1, nfreq
@@ -176,8 +178,8 @@ MODULE rpa_module
 
           !   3.a Read Cholesky matrix 
           call esh5_posthf_read_cholesky(h5id_hamil%id,Q-1,ki-1,ncholQ(Q),&
-                maxnorb*maxnorb,Chol(1,1),error)
-          if(error .ne. 0 ) &
+                maxnorb*maxnorb,Chol(1,1),ierror)
+          if(ierror .ne. 0 ) &
             call errore('rpa','error reading Chol',1)
           ! should I call blas?
 
@@ -186,11 +188,11 @@ MODULE rpa_module
           do ispin=1,nspin
 
             !  3.b read MO matrix
-            call esh5_posthf_read_dm(h5id_hamil%id,"MO_Mat",6,ki-1,ispin-1,MOs(1,1,1),error)
-            if(error .ne. 0 ) &
+            call esh5_posthf_read_dm(h5id_hamil%id,"MO_Mat",6,ki-1,ispin-1,MOs(1,1,1),ierror)
+            if(ierror .ne. 0 ) &
               call errore('rpa','error reading MOs',1)
-            call esh5_posthf_read_dm(h5id_hamil%id,"MO_Mat",6,ka-1,ispin-1,MOs(1,1,2),error)
-            if(error .ne. 0 ) &
+            call esh5_posthf_read_dm(h5id_hamil%id,"MO_Mat",6,ka-1,ispin-1,MOs(1,1,2),ierror)
+            if(ierror .ne. 0 ) &
               call errore('rpa','error reading MOs',1)
 
             !  3.c rotate to spin-orbital basis 
@@ -210,8 +212,6 @@ MODULE rpa_module
                        (0.d0,0.d0),Lia(1,n),noccK(ki,ispin)) 
             enddo
 
-This doesn't make sense, is it (ia|ia) or (ia|ai)???
-If it is (ia|ia), then Ria is the rotated Cholesky from -Q...
             ! Ria,P = sum_uv M(u,a) conjg(CholT(u,v,P) M(v,i)) 
             Ria(:,:) = (0.d0,0.d0)
             ! T1(a,v,Q) = sum_u conj(M(u,a)) CholT(u,v,Q)
@@ -257,6 +257,203 @@ If it is (ia|ia), then Ria is the rotated Cholesky from -Q...
     ! deallocate
     
     !
-  END SUBROUTINE rpa
+  END SUBROUTINE rpa_cholesky
   !  
+  ! Builds L[q][i][a][P] and V[P][Q] directly in MO basis and assembles
+  ! Q[P][Q][q][w] from this. Does not use/need Cholesky decomposition.
+  !
+  SUBROUTINE rpa_df(edrpa,dfft,esh5_orbitals,esh5_df,esosex) 
+    !
+    USE parallel_include
+    USE wvfct, ONLY: wg, et
+    USE klist, ONLY: wk
+    USE gvect, ONLY : ecutrho
+    USE ions_base,          ONLY : nat, ityp, ntyp => nsp
+    !
+    IMPLICIT NONE
+    !
+    TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
+    CHARACTER(len=*), INTENT(IN) :: esh5_orbitals, esh5_df
+    COMPLEX(DP), INTENT(OUT) :: edrpa
+    COMPLEX(DP), INTENT(IN), OPTIONAL :: esosex
+    !
+    TYPE(h5file_type) :: h5id_orbitals, h5id_df
+    !
+    LOGICAL :: get_sosex
+    INTEGER :: i, j, k, n, ip
+    INTEGER :: iq, Q, ka, ki, ia, ii, ispin, ik, ikk, iw, kk0 
+    INTEGER :: Naux, a_beg, a_end, n_a
+    INTEGER :: k_beg, k_end, nkloc, nia, ierror
+    INTEGER :: nfreq, nQuniq, maxnorb
+    INTEGER :: f_beg, f_end, nfloc
+    !
+    INTEGER :: nel(2), maxocc, maxvir
+    INTEGER, ALLOCATABLE :: noccK(:,:), nvirK(:,:)
+    INTEGER, ALLOCATABLE :: norbK(:) 
+    REAL(DP), ALLOCATABLE :: weight(:,:),eigval(:,:)
+    Complex(DP) :: ione
+    COMPLEX(DP), ALLOCATABLE :: Qpq(:,:,:) ! Q matrix 
+    COMPLEX(DP), ALLOCATABLE :: Ypq(:,:,:) ! Y matrix 
+    COMPLEX(DP), ALLOCATABLE :: Liap(:,:) ! left hand side of Qpq 
+    COMPLEX(DP), ALLOCATABLE :: Riap(:,:) ! right hand side of Qpq
+    COMPLEX(DP), ALLOCATABLE :: Bia(:)   ! term with eigenvalues 
+    COMPLEX(DP), ALLOCATABLE :: xfreq(:), wfreq(:)
+
+    ione = (0.d0,1.d0)
+    get_sosex = present(esosex)
+    get_sosex = .false.  ! turn off for now
+
+    ! open orbital file, read basic info
+
+    ! open df file, read basic info
+    Naux = 1
+
+    allocate( norbK(nksym) )
+
+    !  Partition k-points among MPI tasks
+    call fair_divide(k_beg,k_end,my_pool_id+1,npool,nksym)
+    nkloc   = k_end - k_beg + 1
+
+    ! 1. Read eigenvalues, fermi weights and determinte occupied/virtual partitioning
+    allocate( noccK(nksym,nspin), nvirK(nksym,nspin) )
+    allocate(eigval(maxnorb,nksym*nspin),weight(maxnorb,nksym*nspin))
+    weight(:,:) = 0.d0
+    eigval(:,:) = 0.d0
+    noccK(:,:)=0
+    nvirK(:,:)=0
+    do ispin=1,nspin
+      do ik=1,nksym
+        ikk = ik + nksym*(ispin-1)
+!        call esh5_posthf_read_et(h5id_hamil%id,ikk-1,eigval(1,ikk), &
+!                               weight(1,ikk),ierror)
+        if(ierror .ne. 0 ) &
+          call errore('mp2_g','error reading weights',1)
+      enddo
+    enddo
+    ! find number of electrons
+    call get_noccK(noccK,nel,maxnorb,nksym,nspin,weight,maxnorb)
+    write(*,*) ' Number of electrons per spin channel: ',(nel(i),i=1,nspin)
+    do ispin=1,nspin
+      nvirK(:,ispin) = norbK(:) - noccK(:,ispin)
+    enddo
+    maxocc = maxval(noccK(1:nksym,:))
+    maxvir = maxval(nvirK(1:nksym,:))
+
+    ! limiting to insulators for now, need changes in case of metals
+    do ispin=1,nspin
+      do ik=2,nksym
+        if(noccK(ik,ispin) .ne. noccK(1,ispin)) &
+          call errore('rpa','Error: Only insulators for now!!!',1)
+      enddo
+    enddo
+
+    ! Partition ia 
+    call fair_divide(a_beg,a_end,me_pool+1,nproc_pool,maxvir)
+    n_a   = a_end - a_beg + 1
+
+    allocate( Liap(maxocc*n_a,Naux), Riap(maxocc*n_a,Naux), Qpq(Naux,Naux,nfloc+1) )
+    allocate( Bia(maxocc*n_a) )
+    if( get_sosex ) then
+      allocate( Ypq(Naux,Naux,2) ) 
+    endif
+
+    ! 2. Generate frequency grid and weights
+    ! for simplicity now, use transform Gauss-Legendre grid
+    ! setup drequency integration grid    
+    nfreq = 1
+
+    !  Partition nfreq over all processors 
+    !  This is only used for storage purposes, since the frequency loop is
+    !  inside...
+    call fair_divide(f_beg,f_end,me_image+1,nproc_image,nfreq)
+    nfloc   = f_end - f_beg + 1
+
+    ! 3. Loop over Q 
+    edrpa = (0.d0,0.d0)
+!    if(get_sosex) esosex=(0.d0,0.d0)
+    Qpq(:,:,:) = (0.d0,0.d0)
+    do iq=1,nQuniq
+
+      Q = xQ(iq)
+      Qpq(:,:,:) = (0.d0,0.d0)
+
+      ! 
+      !   If Density fitting matrices are already calculated, read them
+      !   from file
+        
+      ! calculate Vpq 
+      ! Vpq
+
+      ! Vpq^{-1} 
+
+      do ik=1,nkloc
+
+        ki = k_beg+ik-1
+        ka = QKtoK2(Q,ki)  ! ka = ki-Q+G
+
+        ! not sure how spin comes in yet!
+        do ispin=1,nspin
+
+          kk0 = nksym*(ispin-1)
+
+          ! Lia,p  
+
+          do iw = 1, nfreq
+
+            ! setup Bia
+            ! MAM: This is wrong with partial occupations! Need to keep
+            ! partially occupied states in both occ and virtual sets!
+            ip = 0
+            do i = a_beg, a_end 
+              if( i <= nvirK(ka, ispin) ) then  
+                ia = noccK(ka,ispin) + i   ! need to keep track of origin or virtual states 
+                do ii = 1, noccK(ki,ispin)
+                  ! fi / [ (e(a) - e(i)) - iw ]
+                  ip = ip + 1
+                  Bia(ip) = weight(ii,ki+kk0) / ( (eigval(ia,ka+kk0) - eigval(ii,ki+kk0)) &
+                                          - ione*wfreq(iw) )
+                enddo
+              endif
+            enddo
+
+            !  scale by eigenvalue factor 
+            !  R(ia,P) = L(ia,P) * B(ia)
+            do i=1,Naux
+              do ia=1,ip
+                Riap(ia,i) = Liap(ia,i) * Bia(ia)
+              enddo
+            enddo
+
+            ! accumulate Qpq = sum conj(Liap) * Riap
+            call zgemm('C','N',Naux,Naux,ip, &
+                       (1.d0,0.d0),Riap,size(Riap,1),Liap,size(Liap,1), &
+                       (0.d0,0.d0),Qpq(1,1,1),Naux)
+
+            ! reduce Qpq locally if it is "your turn"
+            call mp_sum(Qpq(:,:,1),intra_image_comm)
+            if( iw >= f_beg .and. iw < f_end ) then
+              do j=1,Naux  
+                do i=1,Naux  
+                  Qpq(i,j,iw-f_beg+2) = Qpq(i,j,iw-f_beg+2) + Qpq(i,j,1)
+                enddo
+              enddo
+            endif
+
+          enddo
+
+        enddo ! ispin
+        !
+      enddo ! ik
+      !
+
+      ! Qpq(iw) for current Q available. Calculate contribution to Ec 
+
+    enddo ! iq
+    !
+    ! deallocate
+    
+    !
+  END SUBROUTINE rpa_df
+  !  
+
 END MODULE rpa_module
