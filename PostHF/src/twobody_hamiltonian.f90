@@ -108,7 +108,7 @@ MODULE twobody_hamiltonian
     else
       oldh5=0
       WRITE ( str_me_image, '(I4)') me_image
-      h5name = TRIM(hamil_file) //"_part"//trim(str_me_image)
+      h5name = TRIM(hamil_file) //"_part"//adjustl(trim(str_me_image))
     endif
     h5len = LEN_TRIM(h5name)
     CALL esh5_posthf_open_file(h5id_hamil%id,h5name,h5len,oldh5)
