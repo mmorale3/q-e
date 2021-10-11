@@ -1252,9 +1252,16 @@ MODULE orbital_generators
     !
     rotate_basis_ = .true.
     if(present(rotate_basis)) rotate_basis_=rotate_basis
+    
+    ! only full makes sense in UHF calculations
+    if(nspin>1 .AND. TRIM(dtype) .ne. 'full' ) &
+      call errore('diag_hf','diag_hf: Only diag_type=full allowed with nspin>1..',1)
 
-    if(nspin>1 .and. (TRIM(dtype) .ne. 'full')) & 
-      call errore('diag_hf','Only dtype=full allowed with nspin>1',1)
+#if defined(__CUDA)
+#else
+    if(nspin>1) & 
+      call errore('diag_hf','diag_hf: nspin>1 not implemented in CPU build yet.',1)
+#endif
 
     ! open orbital file 
     h5name = TRIM( orb_file )
