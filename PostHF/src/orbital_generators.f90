@@ -89,7 +89,7 @@ MODULE orbital_generators
     nxxs = dfft%nr1x*dfft%nr2x*dfft%nr3x
 
     tmp = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.orbitals.h5'
-    call open_esh5_write(h5id_output_orbs,dfft,tmp,write_psir)
+    call open_esh5_write(h5id_output_orbs,dfft,tmp,1,write_psir)
 
     ! setup h5id_input_orbs if reading from esh5 
     ftype = 'davcio'
@@ -544,7 +544,7 @@ MODULE orbital_generators
     allocate(Orb(npwx))
 
     tmp = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.orbitals.h5'
-    call open_esh5_write(h5id_output_orbs,dfft,tmp,.false.)
+    call open_esh5_write(h5id_output_orbs,dfft,tmp,1,.false.)
     h5id_output_orbs%norbK(:) = 0
     mixed_basis = .true.   
 
@@ -1236,7 +1236,7 @@ MODULE orbital_generators
     !
     LOGICAL :: rotate_basis_
     CHARACTER(len=256) :: h5name
-    INTEGER :: n,h5len,oldh5,error,i0,M,ispin,n0
+    INTEGER :: n,h5len,oldh5,error,i0,M,ispin,n0, n_spins
     INTEGER, ALLOCATABLE :: noccK(:,:) 
     COMPLEX(DP) :: ctemp
     COMPLEX(DP), ALLOCATABLE :: FockM(:,:)   ! Fock matrix
@@ -1250,6 +1250,8 @@ MODULE orbital_generators
     TYPE(h5file_type) :: h5id_hamil, h5id_input_orbs, h5id_output_orbs, &
                          h5id_occ 
     !
+    n_spins = min(2,nspin)
+    !
     rotate_basis_ = .true.
     if(present(rotate_basis)) rotate_basis_=rotate_basis
     
@@ -1257,17 +1259,13 @@ MODULE orbital_generators
     if(nspin>1 .AND. TRIM(dtype) .ne. 'full' ) &
       call errore('diag_hf','diag_hf: Only diag_type=full allowed with nspin>1..',1)
 
-#if defined(__CUDA)
-#else
-    if(nspin>1) & 
-      call errore('diag_hf','diag_hf: nspin>1 not implemented in CPU build yet.',1)
-#endif
-
     ! open orbital file 
     h5name = TRIM( orb_file )
     call open_esh5_read(h5id_input_orbs,h5name)
     if( h5id_input_orbs%grid_type .ne. 1 ) &
       call errore('diag_hf','grid_type ne 1',1)
+    if( h5id_input_orbs%nspin .ne. 1 ) &
+      call errore('diag_hf','nspin ne 1: input basis must be spin independent',1)
 
     h5name = TRIM( occ_file )
     call open_esh5_read(h5id_occ,h5name)
@@ -1292,7 +1290,7 @@ MODULE orbital_generators
         call errore('diag_hf','error opening hamil file',1)
       ! open new orbital file
       h5name = TRIM( new_orb_file )
-      call open_esh5_write(h5id_output_orbs,dfft,h5name)
+      call open_esh5_write(h5id_output_orbs,dfft,h5name,n_spins)
     endif
 
     allocate( FockM(h5id_input_orbs%norbK(1),h5id_input_orbs%norbK(1)) ) 
@@ -1303,7 +1301,7 @@ MODULE orbital_generators
 
     do ik=1,nksym
 
-      do ispin = 1,nspin
+      do ispin = 1,n_spins
 
         ikk = ik + nksym*(ispin-1)
         if( size(FockM,1) .ne. h5id_input_orbs%norbK(ik) ) then 
@@ -1364,7 +1362,7 @@ MODULE orbital_generators
 
           if(rotate_basis_) then
 
-            call get_orbitals_set(h5id_input_orbs,'esh5','psig',dfft,ispin,Orbs,&
+            call get_orbitals_set(h5id_input_orbs,'esh5','psig',dfft,1,Orbs,&
                   1,h5id_input_orbs%norbK(ik),ik,1)
 
             ! 4. rotate orbitals and output with eigenvalues
@@ -1423,10 +1421,11 @@ MODULE orbital_generators
     if(allocated(newOrbs)) deallocate(newOrbs)
 
     if(root_image==me_image) then
-      h5id_output_orbs%norbK(:) = h5id_input_orbs%norbK(:)
+      h5id_output_orbs%norbK(1:nksym) = h5id_input_orbs%norbK(1:nksym)
+      if(n_spins == 2 ) &
+        h5id_output_orbs%norbK(nksym+1:2*nksym) = h5id_input_orbs%norbK(1:nksym)
       call esh5_posthf_close_file(h5id_hamil%id)
-! can't remember if this is supposed to be size norb or nspin*norb, check!!!
-      call esh5_posthf_write_norb(h5id_output_orbs%id,orbsG, 5, nksym, &
+      call esh5_posthf_write_norb(h5id_output_orbs%id,orbsG, 5, n_spins*nksym, &
                                   h5id_output_orbs%norbK, error)
       if(error .ne. 0 ) &
         call errore('diag_hf','error writing norb OrbsG',1)
@@ -1488,7 +1487,7 @@ MODULE orbital_generators
       do ik=1,nks
         if(abs(wk(ik))>1.d-10) occ(:,ik,1) = occ(:,ik,1)/wk(ik)
       enddo
-      call open_esh5_write(h5id_orbs,dfft,h5name,.false.,npol)
+      call open_esh5_write(h5id_orbs,dfft,h5name,nspin,.false.,npol)
       ! write your own k-points
       iks = global_kpoint_index (nkstot, 1)
       do ik=1,nks

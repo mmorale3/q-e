@@ -69,12 +69,12 @@ MODULE mp2_module
     REAL(DP), INTENT(IN), OPTIONAL :: reg_expo
     COMPLEX(DP), INTENT(OUT) :: emp2
     !
-    INTEGER :: Q, ka, kb, iab, ia, ib, ii, ij, ki, kj, ni, nj, iuv
+    INTEGER :: iq, Q, ka, kb, iab, ia, ib, ii, ij, ki, kj, ni, nj, iuv
     INTEGER :: ik, ibnd, nxxs, i, ikk, kk, jj, ia0, iu0, ispin, is1, is2, noa, nob, n
     INTEGER :: a_beg, a_end, b_beg, b_end, ab_beg, ab_end, nabpair  
     INTEGER :: naorb, nborb, iabmax
     INTEGER :: maxv_rank, error
-    INTEGER :: nel(2), maxocc, maxvir, nke_dim
+    INTEGER :: nel(2), maxocc, kk0, maxocc2, maxvir, nke_dim
     INTEGER, ALLOCATABLE :: noccK(:,:), nvirK(:,:) 
     REAL(DP), ALLOCATABLE :: xkcart(:,:)
     REAL(DP) :: regkappa
@@ -82,21 +82,25 @@ MODULE mp2_module
     REAL(DP) :: dQ(3),dQ1(3),dk(3), dG(3, 27), scl, qcut(5)
     REAL(DP) :: residual, maxv, fXX, fac
     REAL(DP) :: etemp, etemp2, q2x
+    COMPLEX(DP) :: one, zero
     LOGICAL :: first, regularize
     ! QPOINT stuff
     INTEGER, ALLOCATABLE :: norbK(:)
     REAL(DP), ALLOCATABLE :: weight(:,:),eigval(:,:)
-    COMPLEX(DP), ALLOCATABLE :: Kia(:,:,:)    
+    COMPLEX(DP), ALLOCATABLE :: Kia(:,:)    
     COMPLEX(DP), ALLOCATABLE :: Kib(:,:,:)    
     COMPLEX(DP), ALLOCATABLE :: Vr(:),Vr2(:)    
     COMPLEX(DP), ALLOCATABLE :: Psiocc(:,:,:)   
+    COMPLEX(DP), ALLOCATABLE :: Psiocc_t(:,:,:)   
     COMPLEX(DP), ALLOCATABLE :: Psivira(:,:,:)  
     COMPLEX(DP), ALLOCATABLE :: Psivirb(:,:,:)  
+    COMPLEX(DP), ALLOCATABLE :: Psivirb_t(:,:,:)  
     COMPLEX(DP), ALLOCATABLE :: vCoulG(:)      ! 
     COMPLEX(DP), ALLOCATABLE :: phasefac(:,:)  ! 
     COMPLEX(DP), ALLOCATABLE :: Rgb(:,:)  ! 
     COMPLEX(DP), ALLOCATABLE :: Vab(:,:)  ! 
     COMPLEX(DP), ALLOCATABLE :: Vba(:,:)  ! 
+    COMPLEX(DP), ALLOCATABLE :: eQ(:,:)
     TYPE(ke_factorization), ALLOCATABLE :: ke(:) ! for paw one-center terms
     COMPLEX(DP),ALLOCATABLE :: paw_one_center(:,:,:)
     TYPE(bec_type),ALLOCATABLE :: becpsia(:)
@@ -106,6 +110,8 @@ MODULE mp2_module
     CHARACTER(len=256) h5name
     type(h5file_type) :: h5id_input_orbs
     !
+    one = (1.0,0.0)
+    zero = (0.0,0.0)
     regp=1
     regkappa=0.d0
     if(present(reg_pow)) regp = max(1,reg_pow)
@@ -125,16 +131,18 @@ MODULE mp2_module
       tabxx => tabp
     ENDIF
 
+    ! assumes that norbK(ik)==norbK(ik+nksym)
     allocate( noccK(nksym,numspin), nvirK(nksym,numspin), norbK(nksym) )
     if(present(esh5_file)) then
       h5name = TRIM(esh5_file)
       call open_esh5_read(h5id_input_orbs,h5name)
-      norbK(:) = h5id_input_orbs%norbK(:)
+      if(h5id_input_orbs%nspin .ne. nspin) call errore('mp2_g','h5id_input_orbs%nspin != nspin..',1)
+      norbK(:) = h5id_input_orbs%norbK(1:nksym)  ! basis can't have spin dependence
       allocate(eigval(h5id_input_orbs%maxnorb,nkstot), &
                       weight(h5id_input_orbs%maxnorb,nkstot))  
       weight(:,:) = 0.d0
       eigval(:,:) = 0.d0
-      do ik=1,nksym
+      do ik=1,nkstot
         call esh5_posthf_read_et(h5id_input_orbs%id,ik-1,eigval(1,ik), &
                                  weight(1,ik),error)  
         if(error .ne. 0 ) &
@@ -156,8 +164,8 @@ MODULE mp2_module
     nvirK(:,1) = norbK(:) - noccK(:,1)
     if(numspin==2) &
       nvirK(:,2) = norbK(:) - noccK(:,2)
-    maxocc = maxval(noccK(1:nksym,1))
-    maxvir = maxval(nvirK(1:nksym,1))
+    maxocc = maxval(noccK(1:nksym,:))
+    maxvir = maxval(nvirK(1:nksym,:))
 
     ! limiting to insulators for now, need changes in case of metals
     first=.true.
@@ -197,14 +205,38 @@ MODULE mp2_module
     if(ionode) write(*,*) 'Reading orbitals from file'
     !
     emp2 = (0.d0,0.d0)
-    ispin = 1  ! alpha for now only
+
+    if(verbose .and. ionode) then
+      write(*,*) ' Summary - naorb, nborb, npwx, ngm, nxxs, nks, nspin:',  &
+                        naorb,nborb,npwx,ngm,nxxs,nksym,nspin
+      write(*,*) ' Main Allocations (per mpi task, in MB): '
+      write(*,*) '     - Kia: ',ngm*naorb*16.0/1024.0/1024.0
+      write(*,*) '     - Kib: ',ngm*nborb*nksym*16.0/1024.0/1024.0
+      write(*,*) '     - Psivira:',nxxs*naorb*nksym*16.0/1024.0/1024.0
+      write(*,*) '     - Psivirb:',nxxs*nborb*nksym*16.0/1024.0/1024.0
+      write(*,*) '     - Psiocc: ',nxxs*maxocc*nksym*16.0/1024.0/1024.0
+      write(*,*) '     - Vab: ',2*naorb*nborb*16.0/1024.0/1024.0
+      write(*,*) '     - Rgb: ',ngm*max(naorb,nborb)*16.0/1024.0/1024.0
+      if(nspin == 2) then
+        write(*,*) '     - Psiocc_t: ',nxxs*maxocc*16.0/1024.0/1024.0
+        write(*,*) '     - Psivirb_t: ',nxxs*nborb*16.0/1024.0/1024.0
+      endif
+      FLUSH( stdout )
+    endif
+    if(nproc_image > 1) call mp_barrier( intra_image_comm )
+
+    if(ionode) write(*,*) 'Allocating arrays'
 
     ! eventually distribute nxxs and reduce matrices below within groups
-    allocate( Kia(ngm,naorb,nksym), Kib(ngm,nborb,nksym) )
+    allocate( Kia(ngm,naorb), Kib(ngm,nborb,nksym) )
     allocate( Psivira(nxxs,naorb,nksym), Psiocc(nxxs,maxocc,nksym) )
     allocate( Psivirb(nxxs,nborb,nksym) )
     allocate( Vab(naorb,nborb), Vba(nborb,naorb), Rgb(ngm,max(naorb,nborb)) )
-    allocate( vCoulG(ngm), Vr(nxxs), Vr2(nxxs) )
+    allocate( vCoulG(ngm), Vr(nxxs), Vr2(nxxs), eQ(nQuniq,3) )
+    if(nspin == 2) then
+      allocate( Psivirb_t(nxxs,nborb,1), Psiocc_t(nxxs,maxocc,1) )
+    endif
+    eQ(:,:) = (0.d0,0.d0)
 
     call start_clock( 'mp2_io' )
     nke_dim = 0
@@ -228,28 +260,6 @@ MODULE mp2_module
         call calculate_factorized_paw_one_center(ke,nke_dim)
         !allocate( paw_one_center(nke_dim,nabpair,nksym) )
       endif
-      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
-                          1,Psiocc,1,maxocc,1,nksym,becpsi=becocc)
-      do ki=1,nksym
-        call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
-                          1,Psivira(:,:,ki:ki),noccK(ki,1)+a_beg,naorb,ki,1, &
-                          becpsi=becpsia(ki:ki))
-        call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft, &
-                          1,Psivirb(:,:,ki:ki),noccK(ki,1)+b_beg,nborb,ki,1, &
-                          becpsi=becpsib(ki:ki))
-      enddo
-    else
-      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
-                          1,Psiocc,1,maxocc,1,nksym)
-      do ki=1,nksym
-        call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
-                          1,Psivira(:,:,ki:ki),noccK(ki,1)+a_beg,naorb,ki,1)
-        call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
-                          1,Psivirb(:,:,ki:ki),noccK(ki,1)+b_beg,nborb,ki,1)
-      enddo
-    endif
-    if(present(esh5_file)) then
-      call close_esh5_read(h5id_input_orbs)
     endif
 
     call stop_clock( 'mp2_io' )
@@ -257,15 +267,40 @@ MODULE mp2_module
     ! need eigenvalues, right now assuming they are given by pwscf files
     if(ionode) write(*,*) 'Starting loop over bands' 
 
-    do ki=1,nksym
+    do ispin=1,min(nspin,2)
 
-      if(ionode) write(*,*) 'K:',ki
+     ! only for insulators, so all kpoints must have same occupation numbers
+     maxocc = noccK(1,ispin)
+     kk0 = nksym*(ispin-1)
+     call start_clock( 'mp2_io' )
+     if(okvan.or.okpaw) then
+      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
+                          ispin,Psiocc,1,maxocc,1,nksym,becpsi=becocc)
+      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
+                          ispin,Psivira,maxocc+a_beg,naorb,1,nksym,becpsi=becpsia)
+      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft, &
+                          ispin,Psivirb,maxocc+b_beg,nborb,1,nksym,becpsi=becpsib)
+     else
+      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
+                          ispin,Psiocc,1,maxocc,1,nksym)
+      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
+                          ispin,Psivira,maxocc+a_beg,naorb,1,nksym)
+      call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
+                          ispin,Psivirb,maxocc+b_beg,nborb,1,nksym)
+     endif
+     call stop_clock( 'mp2_io' )
+
+     do ki=1,nksym
+
+      if(ionode) then
+        write(*,*) 'K, spin:',ki,ispin
+        FLUSH(6)
+      endif
       CALL start_clock ( 'mp2' )
       do ii=1,noccK(ki,ispin)
     
         call start_clock( 'mp2_Kia' )
-        ! calculate Kia/Kib
-        Kia(:,:,:)=(0.d0,0.d0)
+        ! calculate Kib
         Kib(:,:,:)=(0.d0,0.d0)
         do ka=1,nksym
 
@@ -274,37 +309,6 @@ MODULE mp2_module
         
           IF ( okvan .and..not.tqr ) &
             CALL qvan_init (dfft%ngm, xksym (1:3, ki), xksym (1:3, ka))  
-
-          do ibnd=1,naorb
-
-            ! Orbital pairs in R
-            Vr(1:dfft%nnr) = CONJG(Psiocc(1:dfft%nnr,ii,ki)) * &
-                                       Psivira(1:dfft%nnr,ibnd,ka) / omega 
-
-            if(okvan .and. tqr) then
-              ! Orbital pairs in R
-              call addusxx_r(Vr(:),becocc(ki)%k(:,ii),&
-                                         becpsia(ka)%k(:,ibnd))
-            endif
-
-            ! fwfft orbital pairs to G
-            CALL fwfft ('Rho', Vr(:), dfft)
-
-            if(okvan .and. .not.tqr) &
-              CALL addusxx_g(dfft, Vr(:), xksym(1:3,ki), &
-                  xksym(1:3,ka),'c',becphi_c=becocc(ki)%k(:,ii),&
-                  becpsi_c=becpsia(ka)%k(:,ibnd))
-  
-            ! multiply by FFT[ 1/r ]
-            Kia(1:ngm, ibnd, ka) = Vr(dfft%nl(1:ngm)) * vCoulG(1:ngm) * e2Ha / nksym
-
-            if(okpaw) then
-!              call contract_paw_one_center(ke,paw_one_center(:,ibnd,ka), &
-!                  becpsia(ik)%k(:,ia-a_beg+1),becpsib(ik)%k(:,ib-b_beg+1))
-!              paw_one_center(:,ibnd,ik) = paw_one_center(:,ibnd,ik) / (1.d0*nksym)
-            endif
-
-          enddo
 
           do ibnd=1,nborb
 
@@ -342,11 +346,57 @@ MODULE mp2_module
         end do
         call stop_clock( 'mp2_Kia' )
 
-        do Q=1,nksym
+        do iq=1,nQuniq
+
+          Q = xQ(iq)
+          ka = QKtoK2(Q, ki)
+
+          ! calculate Kia 
+          Kia(:,:)=(0.d0,0.d0)
+          call start_clock( 'mp2_Kia' )
+
+          ! vCoulG( iG ) = | G - Q |^{-2} = | G + k(ka) - k(ki)  |^{-2}
+          CALL g2_convolution(dfft%ngm, g, xksym (1:3, ka), xksym (1:3, ki), vCoulG)
+
+          IF ( okvan .and..not.tqr ) &
+            CALL qvan_init (dfft%ngm, xksym (1:3, ki), xksym (1:3, ka))
+
+          do ibnd=1,naorb
+
+            ! Orbital pairs in R
+            Vr(1:dfft%nnr) = CONJG(Psiocc(1:dfft%nnr,ii,ki)) * &
+                                       Psivira(1:dfft%nnr,ibnd,ka) / omega
+
+            if(okvan .and. tqr) then
+              ! Orbital pairs in R
+              call addusxx_r(Vr(:),becocc(ki)%k(:,ii),&
+                                         becpsia(ka)%k(:,ibnd))
+            endif
+
+            ! fwfft orbital pairs to G
+            CALL fwfft ('Rho', Vr(:), dfft)
+
+            if(okvan .and. .not.tqr) &
+              CALL addusxx_g(dfft, Vr(:), xksym(1:3,ki), &
+                  xksym(1:3,ka),'c',becphi_c=becocc(ki)%k(:,ii),&
+                  becpsi_c=becpsia(ka)%k(:,ibnd))
+
+            ! multiply by FFT[ 1/r ]
+            Kia(1:ngm, ibnd) = Vr(dfft%nl(1:ngm)) * vCoulG(1:ngm) * e2Ha / nksym
+
+            if(okpaw) then
+!              call contract_paw_one_center(ke,paw_one_center(:,ibnd,ka), &
+!                  becpsia(ik)%k(:,ia-a_beg+1),becpsib(ik)%k(:,ib-b_beg+1))
+!              paw_one_center(:,ibnd,ik) = paw_one_center(:,ibnd,ik) /
+!              (1.d0*nksym)
+            endif
+
+          enddo
+          IF ( okvan .and..not.tqr ) CALL qvan_clean ()
+          call stop_clock( 'mp2_Kia' )
 
           do kb=1,nksym
 
-            ka = QKtoK2(Q, ki)
             kj = QKtoK2(Q, kb)
 
             ! (ia|jb) 
@@ -399,7 +449,7 @@ MODULE mp2_module
               IF ( okvan .and..not.tqr ) CALL qvan_clean()
 
               call start_clock( 'mp2_mm' )
-              call zgemm('T','N',naorb,nborb,ngm,(1.d0,0.d0),Kia(1,1,ka),ngm,  &
+              call zgemm('T','N',naorb,nborb,ngm,(1.d0,0.d0),Kia,ngm,  &
                    Rgb(1,1),ngm,(0.d0,0.d0),Vab(1,1),naorb)
               call stop_clock( 'mp2_mm' )
 
@@ -454,42 +504,149 @@ MODULE mp2_module
                                             eigval(noccK(kb,1)+b_beg-1+ib,kb) - &
                                             eigval(ii,ki) - eigval(ij,kj) )
 
-                    etemp2 = ((1.d0 - exp(-regkappa*etemp))**(1.d0*regp)) / etemp
+                    etemp2 = wQ(iq) * ((1.d0 - exp(-regkappa*etemp))**(1.d0*regp)) / etemp
                     emp2 = emp2 - Vab(ia,ib) * etemp2 *  &
-                                        conjg( 2.d0*Vab(ia,ib) - Vba(ib,ia) )
+                                        conjg( fac*Vab(ia,ib) - Vba(ib,ia) )
+                    eQ(iq,1) = eQ(iq,1) - Vab(ia,ib) * etemp2 *  &
+                                        conjg( fac*Vab(ia,ib) )
+                    eQ(iq,2) = eQ(iq,2) + Vab(ia,ib) * etemp2 *  &
+                                        conjg( Vba(ib,ia) )
                   enddo
                 else
                   do ib=1,nborb
                     if( noccK(kb,1) + b_beg - 1 + ib > norbK(kb) ) cycle
 ! add one center terms here!
-                    etemp = 1.d0/( eigval(noccK(ka,1)+a_beg-1+ia,ka) + &
+                    etemp = wQ(iq)/( eigval(noccK(ka,1)+a_beg-1+ia,ka) + &
                                             eigval(noccK(kb,1)+b_beg-1+ib,kb) - &
                                             eigval(ii,ki) - eigval(ij,kj) )
                     emp2 = emp2 - etemp * Vab(ia,ib) * & 
-                                        conjg( 2.d0*Vab(ia,ib) - Vba(ib,ia) ) 
+                                        conjg( fac*Vab(ia,ib) - Vba(ib,ia) ) 
+                    eQ(iq,1) = eQ(iq,1) - etemp * Vab(ia,ib) * &
+                                        conjg( fac*Vab(ia,ib) )
+                    eQ(iq,2) = eQ(iq,2) + etemp * Vab(ia,ib) * &
+                                        conjg( Vba(ib,ia) )
                   enddo
                 endif
               enddo
               call stop_clock( 'mp2_abij' )
 
-            enddo
+            enddo ! ij
 
-          enddo
+            ! opposite spin contribution
+            if( ispin==1 .and. nspin>=2 ) then
 
-        enddo
+              maxocc2 = noccK(1,2)
+              ! copy to gpu
+              call start_clock( 'mp2_io' )
+              ! no paw/uspp yet!!!
+              call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
+                          2,Psiocc_t,1,maxocc2,kj,1)
+              call get_orbitals_set(h5id_input_orbs,read_type,'psir',dfft,&
+                          2,Psivirb_t,maxocc2+b_beg,nborb,kb,1)
+              call stop_clock( 'mp2_io' )
 
-      enddo
+              do ij=1,noccK(kj,2)
+
+                call start_clock( 'mp2_Rgb' )
+
+                ! Vab = (ia | jb) = sum_r Kia(r) * conjg(psi_j(r)) * psi_b(r) * exp(iQ) 
+                do ib=1,nborb
+
+                  do i=1,nxxs
+                    Vr(i) = Psiocc_t(i,ij,1) * &
+                         CONJG(Psivirb_t(i,ib,1) * phasefac(i, kk)) 
+                  enddo  
+
+                  ! fwfft orbital pairs to G
+                  call start_clock( 'mp2_fwfft' )
+                  CALL fwfft ('Rho', Vr(:), dfft)
+                  call stop_clock( 'mp2_fwfft' )
+
+                  do i=1,ngm
+                    Rgb(i,ib) = CONJG(Vr(dfft%nl(i)))
+                  enddo
+
+                enddo
+
+                call stop_clock( 'mp2_Rgb' )
+
+                call start_clock( 'mp2_mm' )
+                call zgemm('T','N',naorb,nborb,ngm,one,Kia,ngm,  &
+                    Rgb,ngm,zero,Vab,naorb)
+                call stop_clock( 'mp2_mm' )
+
+                call start_clock( 'mp2_abij' )
+                do ia=1,naorb
+                  if( maxocc + a_beg - 1 + ia > norbK(ka) ) exit
+                  if(regularize) then
+                    do ib=1,nborb
+                      if( maxocc2 + b_beg - 1 + ib > norbK(kb) ) cycle
+! add one center terms here!
+                      etemp = ( eigval(maxocc+a_beg-1+ia,ka) + &
+                                              eigval(maxocc2+b_beg-1+ib,kb+kk0) - &
+                                              eigval(ii,ki) - eigval(ij,kj+kk0) )
+
+                      etemp2 = wQ(iq) * ((1.d0 - exp(-regkappa*etemp))**(1.d0*regp)) / etemp
+                      emp2 = emp2 - 2.d0 * DBLE(Vab(ia,ib) * etemp2 *  &
+                                          conjg( Vab(ia,ib) ))
+                      eQ(iq,1) = eQ(iq,1) - 2.d0 * DBLE(Vab(ia,ib) * etemp2 *  &
+                                          conjg( Vab(ia,ib) )) 
+                    enddo
+                  else
+                    do ib=1,nborb
+                      if( maxocc2 + b_beg - 1 + ib > norbK(kb) ) cycle
+! add one center terms here!
+                      etemp = wQ(iq)/( eigval(maxocc+a_beg-1+ia,ka) + &
+                                            eigval(maxocc2+b_beg-1+ib,kb+kk0) - &
+                                            eigval(ii,ki) - eigval(ij,kj+kk0) )
+                      emp2 = emp2 - 2.d0 * DBLE(etemp * Vab(ia,ib) * & 
+                                          conjg( Vab(ia,ib) )) 
+                      eQ(iq,1) = eQ(iq,1) - 2.d0 * DBLE(etemp * Vab(ia,ib) * & 
+                                          conjg( Vab(ia,ib) )) 
+                    enddo
+                  endif
+                enddo
+                call stop_clock( 'mp2_abij' )
+
+              enddo  ! ij
+            
+            endif ! opposite spin            
+
+          enddo ! kb
+
+        enddo ! Q
+
+      enddo ! ii
       CALL stop_clock ( 'mp2' )
       CALL print_clock( 'mp2' )
 
-    enddo
+     enddo ! ki
 
+    enddo ! ispin
+
+    if(nspin==2) then
+      emp2 = emp2*0.5d0
+      eQ(:,:) = eQ(:,:)*0.50
+    endif
     if(nproc_image > 1) CALL mp_sum ( emp2, intra_image_comm ) 
-    emp2 = emp2/(1.d0*nksym)
+    if(nproc_image > 1) CALL mp_sum ( eQ, intra_image_comm )
+
+    write(*,*) 
+    write(*,*) ' ************************************** '
     write(*,*) '  EMP2 (Ha): ',emp2
+    write(*,*) '  EJ (Ha): ',sum(eQ(:,1))
+    write(*,*) '  EX (Ha): ',sum(eQ(:,2))
+
     IF ( ionode .and. verbose ) THEN
       !
-      WRITE( 6, * )
+      write(*,*)
+      write(*,*) '  Q  EMP2(Q) '
+      do iq=1,nQuniq
+        write(*,'(i5,g14.8,"("g14.6,g14.6")","("g14.6,g14.6")")') iq,wQ(iq),&
+            eQ(iq,1)/wQ(iq),eQ(iq,2)/wQ(iq)
+      enddo
+      !
+      write(*,*)
       !
       CALL print_clock ( 'mp2_Kia' )
       CALL print_clock ( 'mp2_io' )
@@ -504,6 +661,8 @@ MODULE mp2_module
     IF( ALLOCATED(Psiocc) ) DEALLOCATE (Psiocc)
     IF( ALLOCATED(Psivira) ) DEALLOCATE (Psivira)
     IF( ALLOCATED(Psivirb) ) DEALLOCATE (Psivirb)
+    IF( ALLOCATED(Psiocc_t) ) DEALLOCATE (Psiocc_t)
+    IF( ALLOCATED(Psivirb_t) ) DEALLOCATE (Psivirb_t)
     IF( ALLOCATED(vCoulG) ) DEALLOCATE (vCoulG)
     IF( ALLOCATED(phasefac) ) DEALLOCATE (phasefac)
     IF( ALLOCATED(noccK) ) DEALLOCATE(noccK)
@@ -515,6 +674,7 @@ MODULE mp2_module
     IF( ALLOCATED(Rgb) ) DEALLOCATE(Rgb)
     if(allocated(eigval)) deallocate(eigval)
     if(allocated(weight)) deallocate(weight)
+    if(allocated(eQ)) deallocate(eQ)
     if(allocated(paw_one_center)) deallocate(paw_one_center)
     if(okvan) then
       do ik=1,nksym
@@ -531,6 +691,9 @@ MODULE mp2_module
         deallocate(ke(i)%L)
       enddo
       deallocate(ke)
+    endif
+    if(present(esh5_file)) then
+      call close_esh5_read(h5id_input_orbs)
     endif
 
   END SUBROUTINE mp2_g
@@ -583,7 +746,6 @@ MODULE mp2_module
     ! QPOINT stuff
     INTEGER, ALLOCATABLE :: norbK(:)
     REAL(DP), ALLOCATABLE :: weight(:,:),eigval(:,:)
-    COMPLEX(DP), ALLOCATABLE :: Kia(:,:,:)    
     COMPLEX(DP), ALLOCATABLE :: Kib(:,:,:)    
     COMPLEX(DP), ALLOCATABLE :: Vr(:),Vr2(:)    
     COMPLEX(DP), ALLOCATABLE :: Psiocc(:,:,:)   
@@ -650,11 +812,14 @@ MODULE mp2_module
       tabxx => tabp
     ENDIF
 
+    ! the code assumes 
+    ! h5id_input_orbs%norbK(ik) == h5id_input_orbs%norbK(ik+nksym)
     allocate( noccK(nksym,numspin), nvirK(nksym,numspin), norbK(nksym) )
     if(present(esh5_file)) then
       h5name = TRIM(esh5_file)
       call open_esh5_read(h5id_input_orbs,h5name)
-      norbK(:) = h5id_input_orbs%norbK(:)
+      if(h5id_input_orbs%nspin .ne. nspin) call errore('mp2_g','h5id_input_orbs%nspin != nspin..',1)
+      norbK(1:nksym) = h5id_input_orbs%norbK(1:nksym)
       allocate(eigval(h5id_input_orbs%maxnorb,nkstot), &
                       weight(h5id_input_orbs%maxnorb,nkstot))  
       weight(:,:) = 0.d0
@@ -663,7 +828,7 @@ MODULE mp2_module
         call esh5_posthf_read_et(h5id_input_orbs%id,ik-1,eigval(1,ik), &
                                  weight(1,ik),error)  
         if(error .ne. 0 ) &
-          call errore('mp2_g','error reading weights',1)
+            call errore('mp2_g','error reading weights',1)
       enddo  
       ! find number of electrons
       call get_noccK(noccK,nel,h5id_input_orbs%maxnorb,nksym,numspin, &
@@ -712,7 +877,6 @@ MODULE mp2_module
       write(*,*) ' Summary - naorb, nborb, npwx, ngm, nxxs, nks, nspin:',  &
                         naorb,nborb,npwx,ngm,nxxs,nksym,nspin
       write(*,*) ' Host Allocations (in MB): '
-      write(*,*) '     - Kia: ',ngm*naorb*nksym*16.0/1024.0/1024.0
       write(*,*) '     - Kib: ',ngm*nborb*nksym*16.0/1024.0/1024.0
       write(*,*) '     - Psivira:',nxxs*naorb*nksym*16.0/1024.0/1024.0
       write(*,*) '     - Psivirb:',nxxs*nborb*nksym*16.0/1024.0/1024.0
@@ -740,7 +904,7 @@ MODULE mp2_module
     !      you can read them from file. This means that you can minimize
     !      memory usage by making nborb as small as possible 
     !      (instead of equal to naorb like you do now) 
-    allocate( Kia(ngm,naorb,nksym), Kib(ngm,nborb,nksym) )
+    allocate( Kib(ngm,nborb,nksym) )
     allocate( Psivira(nxxs,naorb,nksym), Psiocc(nxxs,maxocc,nksym) )
     allocate( Psivirb(nxxs,nborb,nksym) )
     allocate( Vab(naorb,nborb), Vba(nborb,naorb), Rgb(ngm,max(naorb,nborb)) )
@@ -810,18 +974,17 @@ MODULE mp2_module
 
       do ki=1,nksym
 
-      if(ionode) then
+       if(ionode) then
         write(*,*) 'K,spin:',ki,ispin
         FLUSH(6)
-      endif  
-      CALL start_clock ( 'mp2' )
-      do ii=1,noccK(ki,ispin)
+       endif  
+       CALL start_clock ( 'mp2' )
+       do ii=1,noccK(ki,ispin)
     
         call start_clock( 'mp2_Kia' )
-        ! calculate Kia/Kib
-        Kia(:,:,:)=(0.d0,0.d0)
+        ! calculate Kib
         Kib(:,:,:)=(0.d0,0.d0)
-        Psiocc_d = Psiocc(:,:,ki)
+        Psiocc_d(:,:) = Psiocc(:,:,ki)
         do ka=1,nksym
 
           ! vCoulG( iG ) = | G - Q |^{-2} = | G + k(ka) - k(ki)  |^{-2}
@@ -831,35 +994,8 @@ MODULE mp2_module
 !          IF ( okvan .and..not.tqr ) &
 !            CALL qvan_init (dfft%ngm, xksym (1:3, ki), xksym (1:3, ka))  
 
-          Psivira_d = Psivira(:,:,ka)
           Psivirb_d = Psivirb(:,:,ka)
-          Kia_d(:,:)=(0.d0,0.d0)
           Kib_d(:,:)=(0.d0,0.d0)
-          do ibnd=1,naorb,many_fft
-
-            nfft = min( many_fft, naorb-ibnd+1 )
-            ! Orbital pairs in R
-!$cuf kernel do(2)
-            do j=0,nfft-1
-              do i=1,nxxs
-                Vr_d(i+nxxs*j) = CONJG(Psiocc_d(i,ii)) * &
-                                     Psivira_d(i,ibnd+j) / omega 
-              enddo
-            enddo    
-
-            ! fwfft orbital pairs to G
-            CALL fwfft ('Rho', Vr_d, dfft, howmany=nfft)
-
-            ! multiply by FFT[ 1/r ]
-!$cuf kernel do(2)
-            do j=0,nfft-1
-              do i=1,ngm
-                Kia_d(i, ibnd+j) = Vr_d(nl_d(i)+j*nxxs) * vCoulG_d(i) * e2Ha / nksym
-              enddo
-            enddo
-
-          enddo
-          Kia(:,:,ka) = Kia_d(:,:)  
 
           do ibnd=1,nborb,many_fft
 
@@ -896,9 +1032,41 @@ MODULE mp2_module
 
           Q = xQ(iq)
           ka = QKtoK2(Q, ki)
-          ! move calculation of Kia(:,:,ka) here, do not store Kia for all ka!!!
-          Kia_d = Kia(:,:,ka)
+
+          ! calculate Kia
+          call start_clock( 'mp2_Kia' )
+          ! vCoulG( iG ) = | G - Q |^{-2} = | G + k(ka) - k(ki)  |^{-2}
+          CALL g2_convolution(dfft%ngm, g, xksym (1:3, ka), xksym (1:3, ki), vCoulG)
+          vCoulG_d = vCoulG
+
+          Psiocc_d(:,:) = Psiocc(:,:,ki)
           Psivira_d = Psivira(:,:,ka)
+          Kia_d(:,:)=(0.d0,0.d0)
+          do ibnd=1,naorb,many_fft
+
+            nfft = min( many_fft, naorb-ibnd+1 )
+            ! Orbital pairs in R
+!$cuf kernel do(2)
+            do j=0,nfft-1
+              do i=1,nxxs
+                Vr_d(i+nxxs*j) = CONJG(Psiocc_d(i,ii)) * &
+                                     Psivira_d(i,ibnd+j) / omega
+              enddo
+            enddo
+
+            ! fwfft orbital pairs to G
+            CALL fwfft ('Rho', Vr_d, dfft, howmany=nfft)
+
+            ! multiply by FFT[ 1/r ]
+!$cuf kernel do(2)
+            do j=0,nfft-1
+              do i=1,ngm
+                Kia_d(i, ibnd+j) = Vr_d(nl_d(i)+j*nxxs) * vCoulG_d(i) * e2Ha / nksym
+              enddo
+            enddo
+
+          enddo
+          call stop_clock( 'mp2_Kia' )
 
           do kb=1,nksym
 
@@ -919,7 +1087,7 @@ MODULE mp2_module
             ! copy to gpu
             call start_clock( 'mp2_memcpy' )
             Kib_d = Kib(:,:,kb)
-            Psiocc_d = Psiocc(:,:,kj)
+            Psiocc_d(:,:) = Psiocc(:,:,kj)
             Psivirb_d = Psivirb(:,:,kb)
             phasefac_d = phasefac(:,kk)
             call stop_clock( 'mp2_memcpy' )
@@ -1151,12 +1319,11 @@ MODULE mp2_module
 
         enddo  !iq
 
-      enddo ! ii
-      CALL stop_clock ( 'mp2' )
-      CALL print_clock( 'mp2' )
+       enddo ! ii
+       CALL stop_clock ( 'mp2' )
+       CALL print_clock( 'mp2' )
 
-    enddo ! ki
-      write(*,*) 'eQ: ',eQ(1,1),eQ(1,2)  
+      enddo ! ki
     enddo ! ispin
 
     if(nspin==2) then
@@ -1189,7 +1356,6 @@ MODULE mp2_module
     ENDIF
 
     if(allocated(norbK)) deallocate(norbK)
-    IF( ALLOCATED(Kia) ) DEALLOCATE (Kia)
     IF( ALLOCATED(Kib) ) DEALLOCATE (Kib)
     IF( ALLOCATED(Psiocc) ) DEALLOCATE (Psiocc)
     IF( ALLOCATED(Psivira) ) DEALLOCATE (Psivira)
@@ -1329,8 +1495,8 @@ MODULE mp2_module
       norbK(:) = h5id_input_orbs%norbK(:)
       allocate(eigval(h5id_input_orbs%maxnorb,nkstot), &
                weight(h5id_input_orbs%maxnorb,nkstot))
-      do ik=1,nksym
-        call esh5_posthf_read_et(h5id_input_orbs%id,ik-1,eigval(1,ik),weight(1,ik),error)
+      do ik=1,nkstot
+        call esh5_posthf_read_et(h5id_input_orbs%id,ikk-1,eigval(1,ik),weight(1,ik),error)
         if(error .ne. 0 ) &
           call errore('mp2no_g','error reading weights',1)
       enddo
@@ -1632,7 +1798,7 @@ MODULE mp2_module
 
     if( me_image == root_image) then
       !
-      call open_esh5_write(h5id_output_orbs,dfft,mp2noFile,.false.)  
+      call open_esh5_write(h5id_output_orbs,dfft,mp2noFile,numspin,.false.)  
       allocate( Orbitals(npwx,1), eig(maxnumvir), Vcb(npwx,maxnumvir) )
       !
     endif
@@ -2092,7 +2258,7 @@ MODULE mp2_module
       CALL esh5_posthf_open_write(h5id_output_orbs%id,h5file,h5len, error)
       if(error .ne. 0 ) &
           call errore('mp2no','error opening orbital file for write',1)
-      CALL esh5_posthf_write_meta(h5id_output_orbs%id,orbsG,5,nksym,1,npwx,xkcart_, &
+      CALL esh5_posthf_write_meta(h5id_output_orbs%id,orbsG,5,nksym,numspin,1,npwx,xkcart_, &
                           1,dfft%nr1,dfft%nr2,dfft%nr3,at0,recv,alat,error)
       if(error .ne. 0 ) &
           call errore('mp2no','error writing meta data OrbG',1)
@@ -2364,7 +2530,7 @@ MODULE mp2_module
         recv(1:3,1:3) = bg(1:3,1:3) * tpiba
         at0(1:3,1:3) = at(1:3,1:3) * alat
         CALL esh5_posthf_open_write(h5id_output_orbs%id,tmp,h5len, error)
-        CALL esh5_posthf_write_meta(h5id_output_orbs%id,orbsR,5,2*nksym,1,0,xkcart_, &
+        CALL esh5_posthf_write_meta(h5id_output_orbs%id,orbsR,5,2*nksym,numspin,1,0,xkcart_, &
                         0,dfft%nr1,dfft%nr2,dfft%nr3,at0,recv,alat,error)
         if(error .ne. 0 ) &
           call errore('approx_mp2no','error writing meta data OrbR',1)
@@ -2602,7 +2768,7 @@ MODULE mp2_module
       CALL esh5_posthf_open_write(h5id_output_orbs%id,h5file,h5len, error)
       if(error .ne. 0 ) &
         call errore('approx_mp2no','error opening orbital file for write',1)
-      CALL esh5_posthf_write_meta(h5id_output_orbs%id,orbsG,5,nksym,1,npwx,xkcart_, &
+      CALL esh5_posthf_write_meta(h5id_output_orbs%id,orbsG,5,nksym,numspin,1,npwx,xkcart_, &
                           1,dfft%nr1,dfft%nr2,dfft%nr3,at0,recv,alat,error)
       if(error .ne. 0 ) &
           call errore('approx_mp2no','error writing meta data OrbG',1)
