@@ -860,7 +860,7 @@ void write_sparse_matrix(hid_t hg, const int nr, const int nc, const double* A)
  */
 void F77_FUNC_(esh5_posthf_open_read,ESH5_POSTHF_OPEN_READ)
     (hid_t* h_file, const char* fname, const int* length, const int* nk, int* norbK, int* nmax_dm, 
-     int* npol, int* npwx,
+     int* nspin, int* npol, int* npwx,
      double* xk, int* grid_type, int* nr1, int* nr2, int* nr3, double* recvec, int* error)
 {
   *error=0;
@@ -905,6 +905,11 @@ void F77_FUNC_(esh5_posthf_open_read,ESH5_POSTHF_OPEN_READ)
   *npol = 1;
   ret=H5LTread_dataset(h_orb_grp_read,"npol",H5T_NATIVE_INT,&npol_);
   if(ret>=0) { *npol = npol_; }
+
+  int nspin_=1;
+  *nspin = 1;
+  ret=H5LTread_dataset(h_orb_grp_read,"nspin",H5T_NATIVE_INT,&nspin_);
+  if(ret>=0) { *nspin = nspin_; }
 
   ret=H5LTread_dataset(h_orb_grp_read,"grid_type",H5T_NATIVE_INT,grid_type);
   if(ret<0){*error=1;printf("esh5 problems reading grid_type\n");return;}   
@@ -1064,7 +1069,7 @@ void F77_FUNC_(esh5_posthf_open_write,ESH5_POSTHF_OPEN_WRITE)
  */
 void F77_FUNC_(esh5_posthf_write_meta,ESH5_POSTHF_WRITE_META)
   ( hid_t* h_file,  const char* dname, const int* dlength,
-    const int* nk, const int* npol, const int* npwx, 
+    const int* nk, const int* nspin, const int* npol, const int* npwx, 
     const double* xk, const int* grid_type, const int* nr1, const int* nr2, 
     const int* nr3, const double* lattvec, const double* recvec,
     const double* alat,
@@ -1096,6 +1101,9 @@ void F77_FUNC_(esh5_posthf_write_meta,ESH5_POSTHF_WRITE_META)
   }
 
   herr_t ret=H5LTmake_dataset(h_orb_grp_write,"npol",1,&dim1,H5T_NATIVE_INT,npol);
+  if(ret<0){*error=1;printf("esh5 problems writing to orbital file\n");return;}
+
+  ret=H5LTmake_dataset(h_orb_grp_write,"nspin",1,&dim1,H5T_NATIVE_INT,nspin);
   if(ret<0){*error=1;printf("esh5 problems writing to orbital file\n");return;}
 
   ret=H5LTmake_dataset(h_orb_grp_write,"grid_type",1,&dim1,H5T_NATIVE_INT,grid_type);

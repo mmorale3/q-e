@@ -1246,7 +1246,9 @@ MODULE twobody_hamiltonian
 
   END SUBROUTINE calculate_KS_bscorr
 
-  SUBROUTINE add_FockM(h5id,h5id_occ,ki,ispin,dfft,noccK,FockM) 
+  ! specialized routine for the case where SCFOrbMat is a delta function
+  ! only makes sense for nspin==1 case
+  SUBROUTINE add_FockM_rhf(h5id,h5id_occ,ki,ispin,dfft,noccK,FockM) 
     USE fft_types, ONLY: fft_type_descriptor
     USE ions_base,          ONLY : nat, ityp, ntyp => nsp
     USE gvecw, ONLY : ecutwfc
@@ -1292,8 +1294,7 @@ MODULE twobody_hamiltonian
     if(nspin == 1 ) then
       fac = 2.d0
     else
-      fac = 1.d0
-      call errore('add_FockM','nspin>1',1)
+      call errore('add_FockM_rhf','nspin>1',1)
     endif
 
     if(okvan.or.okpaw) &
@@ -1484,6 +1485,358 @@ MODULE twobody_hamiltonian
       CALL print_clock ( 'add_FockM' )
     endif
 
+  END SUBROUTINE add_FockM_rhf
+
+  SUBROUTINE add_FockM(h5id,h5id_occ,ki,ispin,dfft,noccK,FockM) 
+    USE fft_types, ONLY: fft_type_descriptor
+    USE ions_base,          ONLY : nat, ityp, ntyp => nsp
+    USE gvecw, ONLY : ecutwfc
+    USE uspp,                    ONLY : okvan
+    USE paw_variables,           ONLY : okpaw
+    USE exx, ONLY: ecutfock
+    USE gvect,     ONLY : ecutrho
+    !
+    IMPLICIT NONE
+    !
+    TYPE(h5file_type), INTENT(IN) :: h5id, h5id_occ
+    TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
+    INTEGER, INTENT(IN) :: ki,ispin    
+    INTEGER, INTENT(IN) :: noccK(:,:)    
+    COMPLEX(DP), INTENT(INOUT) :: FockM(:,:)   
+    !
+    INTEGER :: b,kb,i,j,M,M2,i_beg,i_end,j_beg,j_end,ni,nj
+    INTEGER :: k_beg,k_end,nkloc,npw,n,p,maxb,b1,b2
+    INTEGER :: nOrbM1,nOrbM2,nk,ns,is 
+    COMPLEX(DP) :: ctemp
+    REAL(DP) :: fac
+    !
+    INTEGER, ALLOCATABLE :: igki(:)
+    COMPLEX(DP), ALLOCATABLE :: Psi(:,:)   
+    COMPLEX(DP), ALLOCATABLE :: psi_b(:)   
+    COMPLEX(DP), ALLOCATABLE :: Kib(:,:)     
+    COMPLEX(DP), ALLOCATABLE :: Pbb(:)     
+    COMPLEX(DP), ALLOCATABLE :: vCoulG(:) 
+    COMPLEX(DP), ALLOCATABLE :: Fm(:,:)
+    COMPLEX(DP), ALLOCATABLE :: Psi_d(:,:)
+    !
+    INTEGER :: nfft, ierror
+    COMPLEX(DP), ALLOCATABLE :: SCFOrbMat(:,:)
+    COMPLEX(DP), ALLOCATABLE :: psi_scf(:,:)
+    !
+    call start_clock('add_FockM')
+    
+    if(nspin == 1 ) then
+      fac = 2.d0
+    else
+      fac = 1.d0
+    endif
+
+    ! for mixed_basis=.false., you should use add_Fock__rhf routine 
+    call esh5_posthf_read_orbmat_info(h5id_occ%id,'SCFOrbMat',9, &
+             nOrbM1,nOrbM2,nk,ns,ierror)
+    if(ierror.ne.0) &
+      call errore('add-FockM','Error in esh5_posthf_read_orbmat_info',1)
+    if((nk.ne.nksym) .or. (ns.ne.nspin) .or. &
+        (nOrbM2 < maxval(noccK(:,:))) ) &
+      call errore('add-FockM','Inconsistent SCFOrbMat',1)
+    maxb = (maxval(noccK(:,:))+nproc_pool-1)/nproc_pool
+
+    if(okvan.or.okpaw) &
+      call errore('add_FockM','No PAW/USPP yet',1)
+
+    !  Partition k-points among MPI tasks
+    call fair_divide(k_beg,k_end,my_pool_id+1,npool,nksym)
+    nkloc   = k_end - k_beg + 1
+
+    ! Partition M*M 
+    M = h5id%norbK(ki)
+    call find_2d_partition(M,me_pool+1,nproc_pool,i_beg,i_end,j_beg,j_end)
+    ni = i_end-i_beg+1
+    nj = j_end-j_beg+1
+
+    allocate( Psi(npwx,min(16,maxval(h5id%norbK(:)))) ) 
+    allocate( psi_b(dfft%nnr), Pbb(dfft%nnr)) 
+    allocate( vCoulG(dfft%ngm), igki(npwx) )
+    allocate( SCFOrbMat(nOrbM1,nOrbM2), psi_scf(npwx,maxb) )
+    allocate( Kib(dfft%ngm,ni+nj) )
+    allocate( Psi_d(dfft%nnr,ni+nj) )
+    allocate( Fm(ni,nj) )
+    !
+
+    Fm(:,:) = FockM(i_beg:i_end,j_beg:j_end) ! set Fm to incoming value 
+    !
+
+    Pbb(:) = (0.d0,0.d0)  
+    CALL gk_sort (xksym (1:3, ki), dfft%ngm, g, ecutwfc / tpiba2, &
+             npw, igki(1), g2kin)
+
+    call start_clock('diag_io')
+    ! basis orbitals are spin-independent
+    do i=1,ni
+      call get_psi_esh5(h5id,i+i_beg-1,ki,1,psic)
+      psi_b(:)=(0.d0,0.d0)
+      psi_b(dfft%nl(igki(1:ngksym(ki))))=psic(1:ngksym(ki))
+      if(gamma_only) &
+        psi_b(dfft%nlm(igki(1:ngksym(ki))))=CONJG(psic(1:ngksym(ki)))
+      Psi_d(:,i) = psi_b(:)  
+    enddo
+    ! basis orbitals are spin-independent
+    do j=1,nj
+      call get_psi_esh5(h5id,j+j_beg-1,ki,1,psic)
+      psi_b(:)=(0.d0,0.d0)
+      psi_b(dfft%nl(igki(1:ngksym(ki))))=psic(1:ngksym(ki))
+      if(gamma_only) &
+        psi_b(dfft%nlm(igki(1:ngksym(ki))))=CONJG(psic(1:ngksym(ki)))
+      Psi_d(:,ni+j) = psi_b(:)  
+    enddo
+    ! copy wfns to device
+    do i=1,ni+nj
+      CALL invfft ('Wave', Psi_d(:,i), dfft)
+    enddo
+    call stop_clock('diag_io')
+
+    do kb=k_beg,k_end
+
+      ! vCoulG( iG ) = | G - Q |^{-2} = | G + k(kb) - k(ka)  |^{-2}
+      CALL g2_convolution(dfft%ngm, g, xksym (1:3, kb), xksym (1:3, ki), vCoulG)
+      ! 
+      CALL gk_sort (xksym (1:3, kb), dfft%ngm, g, ecutwfc / tpiba2, &
+              npw, igksym(1), g2kin)
+      !
+      ! read MF overlap matrix and generate (hopefully!!!) HF orbitals  
+      ! spin dependence of HF state in SCFOrbMat  
+      !
+      call esh5_posthf_read_orbmat(h5id_occ%id,'SCFOrbMat',9,kb-1,ispin-1, &
+               SCFOrbMat,ierror) 
+      if(ierror.ne.0) &
+        call errore('add-FockM','Error in esh5_posthf_read_orbmat',1)
+
+      !
+      ! distributing psi_scf round-robin for simpler implementation  
+      ! 
+      call start_clock('diag_io')
+      ! modify SCFOrbMat matrix
+      maxb=0
+      do b=1,noccK(kb,ispin)
+        b1 = mod(b-1,nproc_pool)   ! index of mpi task with state
+        b2 = (b-1)/nproc_pool+1      ! location of state in matrix 
+        if(me_pool == b1) then
+          maxb=b2
+          SCFOrbMat(:,b2) = SCFOrbMat(:,b)
+        endif
+      enddo
+
+      ! using Psi as a working array 
+      ! 
+      psi_scf(:,:) = (0.d0,0.d0)
+      if(maxb > 0) then
+        b1 = min(nOrbM1,h5id%norbK(kb))
+        do i=1,b1,size(Psi,2)
+          n = min( size(Psi,2), b1-i+1 )
+          do j=1,n
+            ! basis set is spin independent
+            call get_psi_esh5(h5id, j+i-1,kb,1,Psi(:,j))
+          enddo  
+          call zgemm('N','N',npw,maxb,n,(1.d0,0.d0),Psi(1,1),npwx,  &
+                     SCFOrbMat(i,1),nOrbM1,(1.d0,0.d0),psi_scf,npwx)
+        enddo
+      endif
+      call stop_clock('diag_io')
+      !
+      do b=1,noccK(kb,ispin)
+        ! read psi_b 
+        psi_b(:) = (0.d0,0.d0)
+        b1 = mod(b-1,nproc_pool)   ! index of mpi task with state
+        b2 = (b-1)/nproc_pool+1      ! location of state in matrix 
+        if(me_pool == b1) psic(1:npw) = psi_scf(1:npw,b2)
+        call mp_bcast( psic, b1, intra_pool_comm ) 
+        psi_b(dfft%nl(igksym(1:npw)))=psic(1:npw)
+        if(gamma_only) &
+          psi_b(dfft%nlm(igksym(1:npw)))=CONJG(psic(1:npw))
+        call start_clock('diag_invfft')
+        CALL invfft ('Wave', psi_b(:), dfft)
+        call stop_clock('diag_invfft')
+
+        if(me_pool == b1) &
+          Pbb(1:dfft%nnr) = Pbb(1:dfft%nnr) + CONJG(psi_b(1:dfft%nnr)) * psi_b(1:dfft%nnr)  
+
+        do i=1,ni
+          !
+          do n = 1,dfft%nnr  
+            psic(n) = CONJG(Psi_d(n,i)) * &
+                                  psi_b(n) / omega
+          enddo
+          !
+          ! fwfft orbital pairs to G
+          call start_clock('diag_fwfft')
+          CALL fwfft ('Rho', psic, dfft)
+          call stop_clock('diag_fwfft')  
+
+!          ! multiply by FFT[ 1/r ]
+          do n = 1,dfft%ngm  
+            Kib(n,i) = psic(dfft%nl(n)) * vCoulG(n)
+          enddo
+! incomplete in gamma_only!!!
+        enddo
+
+        do j=1,nj
+          !
+          do n = 1,dfft%nnr
+            psic(n) = CONJG(Psi_d(n,j+ni)) * psi_b(n) 
+          enddo
+          !
+          ! fwfft orbital pairs to G
+          call start_clock('diag_fwfft')
+          CALL fwfft ('Rho', psic, dfft)
+          call stop_clock('diag_fwfft')
+
+!          ! multiply by FFT[ 1/r ]
+          do n = 1,dfft%ngm
+            Kib(n,j+ni) = CONJG(psic(dfft%nl(n))) 
+          enddo
+! incomplete in gamma_only!!!
+        enddo
+
+        ctemp = -e2Ha/(1.d0*nksym)
+        call zgemm('T','N',& 
+            ni,nj,dfft%ngm,ctemp,Kib,dfft%ngm,Kib(1,ni+1),dfft%ngm,&
+            (1.d0,0.d0),Fm(1,1),ni) 
+
+      enddo  ! b
+
+    enddo  ! kb
+
+    ! copy back to host
+    FockM(i_beg:i_end,j_beg:j_end) = Fm(:,:)
+
+    ! add other spin contribution to Pbb
+    if(nspin > 1) then
+      is = 3-ispin
+      do kb=k_beg,k_end
+        ! 
+        CALL gk_sort (xksym (1:3, kb), dfft%ngm, g, ecutwfc / tpiba2, &
+                npw, igksym(1), g2kin)
+        !
+        ! read MF overlap matrix and generate (hopefully!!!) HF orbitals  
+        !
+        call esh5_posthf_read_orbmat(h5id_occ%id,'SCFOrbMat',9,kb-1,is-1, &
+               SCFOrbMat,ierror) 
+        if(ierror.ne.0) &
+          call errore('add-FockM','Error in esh5_posthf_read_orbmat',1)
+
+        !
+        ! distributing psi_scf round-robin for simpler implementation  
+        ! 
+        call start_clock('diag_io')
+        ! modify SCFOrbMat matrix
+        maxb=0
+        do b=1,noccK(kb,is)
+          b1 = mod(b-1,nproc_pool)   ! index of mpi task with state
+          b2 = (b-1)/nproc_pool+1      ! location of state in matrix 
+          if(me_pool == b1) then
+            maxb=b2
+            SCFOrbMat(:,b2) = SCFOrbMat(:,b)
+          endif
+        enddo
+
+        ! in this implementation, h5id_occ has no reason to exist!!!
+        ! using Psi as a working array 
+        ! 
+        psi_scf(:,:) = (0.d0,0.d0)
+        if(maxb > 0) then
+          b1 = min(nOrbM1,h5id%norbK(kb))
+          do i=1,b1,size(Psi,2)
+            n = min( size(Psi,2), b1-i+1 )
+            do j=1,n
+              call get_psi_esh5(h5id, j+i-1,kb,1,Psi(:,j))
+            enddo  
+            call zgemm('N','N',npw,maxb,n,(1.d0,0.d0),Psi(1,1),npwx,  &
+                       SCFOrbMat(i,1),nOrbM1,(1.d0,0.d0),psi_scf,npwx)
+          enddo
+        endif
+        call stop_clock('diag_io')
+        !
+        do b=1,noccK(kb,is)
+          psi_b(:) = (0.d0,0.d0)
+          b1 = mod(b-1,nproc_pool)   ! index of mpi task with state
+          b2 = (b-1)/nproc_pool+1      ! location of state in matrix 
+          if(me_pool == b1) then 
+            psi_b(dfft%nl(igksym(1:npw)))=psi_scf(1:npw,b2)
+            if(gamma_only) &
+              psi_b(dfft%nlm(igksym(1:npw)))=CONJG(psi_scf(1:npw,b2))
+            call start_clock('diag_invfft')
+            CALL invfft ('Wave', psi_b(:), dfft)
+            call stop_clock('diag_invfft')
+            Pbb(1:dfft%nnr) = Pbb(1:dfft%nnr) + CONJG(psi_b(1:dfft%nnr)) * psi_b(1:dfft%nnr)  
+          endif
+        enddo
+        !
+      enddo
+      !
+    endif
+    ! reduce Pbb within pool
+    call mp_sum( Pbb, intra_pool_comm ) 
+
+    ! add coulomb contribution here
+    ! vCoulG( iG ) = | G - Q |^{-2} = | G + k(kb) - k(ka)  |^{-2}
+    CALL g2_convolution(dfft%ngm, g, xksym (1:3, ki), xksym (1:3, ki), vCoulG)
+    ! fwfft orbital pairs to G
+    psic(1:dfft%nnr) = Pbb
+    CALL fwfft ('Rho', psic(1:dfft%nnr), dfft)
+    do n=1,dfft%ngm    
+      psi_b(n) = vCoulG(n) * CONJG(psic(dfft%nl(n)))
+    enddo
+    !
+    do i=1,ni
+      !
+      do j=1,nj
+        !
+        do n = 1,dfft%nnr
+          psic(n) = CONJG(Psi_d(n,i)) * &
+                           Psi_d(n,j+ni) / omega
+        enddo
+        !
+        call start_clock('diag_fwfft')
+        ! fwfft orbital pairs to G 
+        CALL fwfft ('Rho', psic, dfft)
+        call stop_clock('diag_fwfft')
+
+        ! Coulomb contribution
+        ctemp=(0.d0,0.d0)
+        do n=1,dfft%ngm
+          ctemp = ctemp + psic(dfft%nl(n)) * psi_b(n)
+! incomplete in gamma_only!!!
+        enddo
+        FockM(i+i_beg-1,j+j_beg-1) = FockM(i+i_beg-1,j+j_beg-1) + fac * e2Ha * ctemp / nksym
+        !
+      enddo ! j
+      !
+    enddo ! i 
+
+    if(nproc_image>1) call mp_sum( FockM, intra_image_comm )
+
+    if(allocated(igki)) deallocate(igki)    
+    if(allocated(Psi)) deallocate(Psi)    
+    if(allocated(psi_b)) deallocate(psi_b)    
+    if(allocated(Pbb)) deallocate(Pbb)    
+    if(allocated(vCoulG)) deallocate(vCoulG)    
+    !
+    if(allocated(Psi_d)) deallocate(Psi_d)
+    if(allocated(Kib)) deallocate(Kib)
+    if(allocated(Fm)) deallocate(Fm)
+    IF( ALLOCATED(SCFOrbMat) ) DEALLOCATE (SCFOrbMat)
+    IF( ALLOCATED(psi_scf) ) DEALLOCATE (psi_scf)
+    call stop_clock('add_FockM')
+
+    if(ionode) then
+      write(*,*) 'Timers: '
+      CALL print_clock ( 'diag_io' )
+      CALL print_clock ( 'diag_invfft' )
+      CALL print_clock ( 'diag_fwfft' )
+      CALL print_clock ( 'add_FockM' )
+    endif
+
+    !
   END SUBROUTINE add_FockM
 
 #if defined(__CUDA)

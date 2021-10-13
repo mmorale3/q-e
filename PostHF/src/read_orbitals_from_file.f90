@@ -24,7 +24,7 @@ MODULE read_orbitals_from_file
   TYPE h5file_type
     INTEGER*8 id
     INTEGER, ALLOCATABLE :: norbK(:)
-    INTEGER :: grid_type, nmax_DM, nr1, nr2, nr3, npwx, npol, maxnorb
+    INTEGER :: grid_type, nmax_DM, nr1, nr2, nr3, npwx, nspin, npol, maxnorb
   END TYPE h5file_type
   !
   INTEGER, ALLOCATABLE :: igk(:)
@@ -46,6 +46,7 @@ MODULE read_orbitals_from_file
     INTEGER :: i, j, ik, error
     REAL(DP), ALLOCATABLE :: xk_(:,:)
     REAL(DP) :: recv(3,3)
+    INTEGER, ALLOCATABLE :: norb_(:)
     !
     ! orbital file open in read_only mode
     allocate(xk_(3,nksym))
@@ -55,19 +56,25 @@ MODULE read_orbitals_from_file
     h5id%nr2 = -1
     h5id%nr3 = -1
     h5id%npwx=-1
+    h5id%nspin=-1
     h5id%npol=-1
     h5id%id = int(-1,kind=8)
-    if(.not.allocated(h5id%norbK)) then
-      allocate(h5id%norbK(nksym*nspin))
-    else if(size(h5id%norbK,1) .ne. nspin*nksym) then
-      deallocate(h5id%norbK)
-      allocate(h5id%norbK(nksym*nspin))
-    endif
-    h5id%norbK(:)=0
-    call esh5_posthf_open_read(h5id%id,fname,h5len,nksym,h5id%norbK,&
-            h5id%nmax_DM,h5id%npol,h5id%npwx,xk_, &
+    allocate(norb_(4*nksym))
+    norb_(:)=0
+    call esh5_posthf_open_read(h5id%id,fname,h5len,nksym,norb_,&
+            h5id%nmax_DM,h5id%nspin,h5id%npol,h5id%npwx,xk_, &
             h5id%grid_type,h5id%nr1,h5id%nr2,h5id%nr3,recv,error)
-    h5id%maxnorb = maxval(h5id%norbK(1:nksym*nspin))
+    if(h5id%nspin < 1 .or. h5id%nspin > 2) &
+      call errore('open_esh5','h5id%nspin < 1 OR h5id%nspin > 2',1) 
+    if(.not.allocated(h5id%norbK)) then
+      allocate(h5id%norbK(nksym*h5id%nspin))
+    else if(size(h5id%norbK,1) .ne. nksym*h5id%nspin) then
+      deallocate(h5id%norbK)
+      allocate(h5id%norbK(nksym*h5id%nspin))
+    endif    
+    h5id%norbK(1:nksym*h5id%nspin) = norb_(1:nksym*h5id%nspin)
+    deallocate(norb_)
+    h5id%maxnorb = maxval(h5id%norbK(:))
     if(error .ne. 0 ) &
       call errore('open_esh5','error opening orbital file for read',1)
     if( h5id%grid_type.eq.1 .and. h5id%npwx.gt.npwx) &
@@ -133,7 +140,7 @@ MODULE read_orbitals_from_file
     CONE  = (1.d0,0.d0)
     CMINUSONE  = (-1.d0,0.d0)
     CZERO = (0.d0,0.d0)
-    !    
+    !
     if(.not.allocated(igk)) allocate(igk(npwx))
     !
     if( (trim(orbtype).ne.'psir') .and. &
@@ -205,7 +212,9 @@ MODULE read_orbitals_from_file
     INTEGER :: npw,kb,ibnd,error, nktot
     REAL(DP) :: dk(3)
     !
-
+    if(ispin > h5id%nspin) &
+      call errore('psi_from_esh5',' ispin > h5id%nspin. ',1)   
+    !
     if(PRESENT(becpsi)) call allocate_bec_type(nkb,1,becdummy)
     if( PRESENT(Q) .and. (.not.PRESENT(qkmap))) & 
         call errore('read_orbitals::read_from_esh5 both Q,qkmap. ',1)
@@ -387,6 +396,9 @@ MODULE read_orbitals_from_file
     COMPLEX(DP),  INTENT(OUT)  :: buff(:)
     INTEGER :: ikk, error
     !
+    if(ispin > h5id%nspin) &
+      call errore('get_psi_esh5',' ispin > h5id%nspin. ',1)   
+    !
     buff(:)=(0.d0,0.d0)
     ikk = ik + nksym*(ispin-1)
     call esh5_posthf_read(h5id%id,ikk-1,ibnd-1,1,buff,size(buff,1),error)
@@ -398,7 +410,7 @@ MODULE read_orbitals_from_file
   !
   ! adding writing routines here too
   !  
-  SUBROUTINE open_esh5_write(h5id,dfft,h5name,write_psir,npolarization)
+  SUBROUTINE open_esh5_write(h5id,dfft,h5name,n_spins,write_psir,npolarization)
   !  
     USE cell_base, ONLY: alat, tpiba, at, bg
     USE fft_types, ONLY: fft_type_descriptor
@@ -407,6 +419,7 @@ MODULE read_orbitals_from_file
     !
     TYPE(h5file_type), INTENT(INOUT) :: h5id
     CHARACTER(len=*), INTENT(IN) :: h5name 
+    INTEGER, INTENT(IN) :: n_spins
     LOGICAL, INTENT(IN), OPTIONAL :: write_psir 
     INTEGER, INTENT(IN), OPTIONAL :: npolarization
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
@@ -420,10 +433,10 @@ MODULE read_orbitals_from_file
     if(present(npolarization)) npol_ = npolarization
 
     if(.not.allocated(h5id%norbK)) then
-      allocate(h5id%norbK(nksym))
-    else if(size(h5id%norbK,1) .ne. nksym) then
+      allocate(h5id%norbK(nksym*n_spins))
+    else if(size(h5id%norbK,1) .ne. n_spins*nksym) then
       deallocate(h5id%norbK)
-      allocate(h5id%norbK(nksym))
+      allocate(h5id%norbK(nksym*n_spins))
     endif
     allocate( xkcart_(3,nksym) )
     do ik=1,nksym
@@ -435,18 +448,20 @@ MODULE read_orbitals_from_file
     CALL esh5_posthf_open_write(h5id%id,h5name,h5len, error)
     if(error .ne. 0 ) &
         call errore('open_esh5_write','error opening orbital file for write',1)
-    CALL esh5_posthf_write_meta(h5id%id,orbsG,5,nksym,npol_,npwx,xkcart_, &
+    CALL esh5_posthf_write_meta(h5id%id,orbsG,5,nksym,n_spins,npol_,npwx,xkcart_, &
                         1,dfft%nr1,dfft%nr2,dfft%nr3,at0,recv,alat,error)
     if(error .ne. 0 ) &
         call errore('open_esh5_write','error writing meta data OrbG',1)
     if(PRESENT(write_psir)) then
       if(write_psir) then
-        CALL esh5_posthf_write_meta(h5id%id,orbsR,5,nksym,npol_,0,xkcart_, &
+        CALL esh5_posthf_write_meta(h5id%id,orbsR,5,nksym,n_spins,npol_,0,xkcart_, &
                           0,dfft%nr1,dfft%nr2,dfft%nr3,at0,recv,alat,error)
         if(error .ne. 0 ) &
           call errore('pw2posthf','error writing meta data OrbR',1)
       endif
     endif
+    h5id%nspin = n_spins
+    h5id%npol = npol_
     deallocate(xkcart_)
   !  
   END SUBROUTINE open_esh5_write 

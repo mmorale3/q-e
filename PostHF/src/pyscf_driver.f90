@@ -434,13 +434,7 @@ subroutine pyscf_driver_mp2(out_prefix_,diag,diag_type,nread_from_h5, &
       else if(TRIM(diag_type) == 'keep_occ') then
         call diag_hf(dffts,'vir_keep_occ_et',hamilFile,orbsFile,orbsFile,canOrbsFile)
       else if(TRIM(diag_type) == 'fullpw') then
-! MAM: This needs to be FIXED!!!!
-! CPU and GPU codes have different behavior!
-#if defined(__CUDA)
         call diag_hf(dffts,'full',hamilFile,orbsFile,orbsFile,canOrbsFile)
-#else
-        call diag_hf(dffts,'full',hamilFile,h5qeorbs,orbsFile,canOrbsFile)
-#endif
       endif
     endif
   else
@@ -452,13 +446,7 @@ subroutine pyscf_driver_mp2(out_prefix_,diag,diag_type,nread_from_h5, &
       elseif(TRIM(diag_type) == 'keep_occ') then
         call diag_hf(dffts,'vir_keep_occ_et',hamilFile,orbsFile,orbsFile,canOrbsFile)
       else if(TRIM(diag_type) == 'fullpw') then
-! MAM: This needs to be FIXED!!!!
-! CPU and GPU codes have different behavior!
-#if defined(__CUDA)
         call diag_hf(dffts,'full',hamilFile,orbsFile,orbsFile,canOrbsFile)
-#else
-        call diag_hf(dffts,'full',hamilFile,h5qeorbs,orbsFile,canOrbsFile)
-#endif
       endif
     endif
   endif
