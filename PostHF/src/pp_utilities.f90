@@ -400,6 +400,43 @@ END SUBROUTINE calculate_phase_factor
 
   END SUBROUTINE eigsysD
   !
+  ! SVD of a complex hermitian matrix.
+  ! A is overwritten with the left singular vectors
+  !
+  SUBROUTINE svdh(n, A, lda, W)
+    !
+    USE KINDS, ONLY : DP
+    !
+    IMPLICIT NONE
+    !
+    INTEGER, INTENT(IN) :: n, lda
+    COMPLEX(DP), INTENT(INOUT) :: A(lda,n)
+    REAL(DP), INTENT(OUT) :: W(n)
+    !
+    INTEGER :: info, lwork 
+    REAL(DP), ALLOCATABLE :: rwork(:)
+    COMPLEX(DP), ALLOCATABLE :: work(:)
+
+    allocate( work(1), rwork(5*n) )
+
+    lwork = -1
+    call zgesvd( 'O','N', n, n, A, lda, W, A, lda, A, lda,&
+             work, lwork, rwork, info)
+    if(info .ne. 0) &
+      call errore('svd','info .ne. 0',info)
+
+    lwork = INT(dble(work(1)))
+    deallocate(work)
+    allocate( work(lwork) )
+
+    call zgesvd( 'O','N', n, n, A, lda, W, A, lda, A, lda,&
+             work, lwork, rwork, info)
+    if(info .ne. 0) &
+      call errore('svd','info .ne. 0',info)
+    deallocate(work, rwork)
+    !
+  END SUBROUTINE svdh 
+  !
   SUBROUTINE zmatinv (n, a, lda)
   !-----------------------------------------------------------------------
   !

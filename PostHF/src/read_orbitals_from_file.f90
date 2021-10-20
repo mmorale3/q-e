@@ -24,7 +24,8 @@ MODULE read_orbitals_from_file
   TYPE h5file_type
     INTEGER*8 id
     INTEGER, ALLOCATABLE :: norbK(:)
-    INTEGER :: grid_type, nmax_DM, nr1, nr2, nr3, npwx, nspin, npol, maxnorb
+    REAL(DP), ALLOCATABLE :: xk(:,:)
+    INTEGER :: grid_type, nkpts, nmax_DM, nr1, nr2, nr3, npwx, nspin, npol, maxnorb
   END TYPE h5file_type
   !
   INTEGER, ALLOCATABLE :: igk(:)
@@ -34,7 +35,7 @@ MODULE read_orbitals_from_file
   !  
   CONTAINS
   !
-  SUBROUTINE open_esh5_read(h5id, fname)
+  SUBROUTINE open_esh5_read(h5id, fname, check_kpts_)
     !
     USE cell_base, ONLY: tpiba, bg
     !
@@ -42,12 +43,16 @@ MODULE read_orbitals_from_file
     !
     CHARACTER(len=*), INTENT(IN) :: fname
     TYPE(h5file_type), INTENT(INOUT) :: h5id
+    LOGICAL, OPTIONAL, INTENT(IN) :: check_kpts_
     INTEGER :: h5len, oldh5, n_
     INTEGER :: i, j, ik, error
     REAL(DP), ALLOCATABLE :: xk_(:,:)
     REAL(DP) :: recv(3,3)
     INTEGER, ALLOCATABLE :: norb_(:)
+    LOGICAL :: check_kpts
     !
+    check_kpts = .true.
+    if(present(check_kpts_)) check_kpts = check_kpts_
     ! orbital file open in read_only mode
     allocate(xk_(3,nksym))
     h5len = LEN_TRIM(fname)
@@ -61,18 +66,21 @@ MODULE read_orbitals_from_file
     h5id%id = int(-1,kind=8)
     allocate(norb_(4*nksym))
     norb_(:)=0
-    call esh5_posthf_open_read(h5id%id,fname,h5len,nksym,norb_,&
+    call esh5_posthf_open_read(h5id%id,fname,h5len,h5id%nkpts,norb_,&
             h5id%nmax_DM,h5id%nspin,h5id%npol,h5id%npwx,xk_, &
             h5id%grid_type,h5id%nr1,h5id%nr2,h5id%nr3,recv,error)
+    ! Note: the number of kpoints in the file can not be larger than nksym right now
+    if(h5id%nkpts > nksym) &
+      call errore('open_esh5','h5id%nkpts > nksym',1) 
     if(h5id%nspin < 1 .or. h5id%nspin > 2) &
       call errore('open_esh5','h5id%nspin < 1 OR h5id%nspin > 2',1) 
     if(.not.allocated(h5id%norbK)) then
-      allocate(h5id%norbK(nksym*h5id%nspin))
-    else if(size(h5id%norbK,1) .ne. nksym*h5id%nspin) then
+      allocate(h5id%norbK(h5id%nkpts*h5id%nspin))
+    else if(size(h5id%norbK,1) .ne. h5id%nkpts*h5id%nspin) then
       deallocate(h5id%norbK)
-      allocate(h5id%norbK(nksym*h5id%nspin))
+      allocate(h5id%norbK(h5id%nkpts*h5id%nspin))
     endif    
-    h5id%norbK(1:nksym*h5id%nspin) = norb_(1:nksym*h5id%nspin)
+    h5id%norbK(1:h5id%nkpts*h5id%nspin) = norb_(1:h5id%nkpts*h5id%nspin)
     deallocate(norb_)
     h5id%maxnorb = maxval(h5id%norbK(:))
     if(error .ne. 0 ) &
@@ -87,13 +95,25 @@ MODULE read_orbitals_from_file
         call errore('open_esh5',' error: rec vectors do not agree',1)
       endif
     enddo
-    do i=1,nksym
-      if(sum( (xk_(1:3,i)/tpiba-xksym(1:3,i))**2 ) .gt. 1.d-6) then
-        write(*,*) 'xk file: ',i,(xk_(j,i)/tpiba,j=1,3)
-        write(*,*) 'xk  QE: ',i,(xksym(j,i),j=1,3)
-        call errore('open_esh5',' error: k-points do not agree',1)
-      endif
-    enddo
+    if(check_kpts) then
+      if(h5id%nkpts .ne. nksym) &
+        call errore('open_esh5','h5id%nkpts != nksym with check_kpts.',1)
+      do i=1,nksym
+        if(sum( (xk_(1:3,i)/tpiba-xksym(1:3,i))**2 ) .gt. 1.d-6) then
+          write(*,*) 'xk file: ',i,(xk_(j,i)/tpiba,j=1,3)
+          write(*,*) 'xk  QE: ',i,(xksym(j,i),j=1,3)
+          call errore('open_esh5',' error: k-points do not agree',1)
+        endif
+      enddo
+    endif
+    if(.not.allocated(h5id%xk)) then
+      allocate(h5id%xk(3,h5id%nkpts))
+    else if( (size(h5id%xk,1) .ne. 3) .or. &
+          (size(h5id%xk,2) .ne. h5id%nkpts) ) then
+      deallocate(h5id%xk)
+      allocate(h5id%xk(3,h5id%nkpts))
+    endif
+    h5id%xk(1:3,1:h5id%nkpts) = xk_(1:3,1:h5id%nkpts)/tpiba
     !
     deallocate(xk_)
     !
@@ -108,6 +128,7 @@ MODULE read_orbitals_from_file
     call esh5_posthf_close_read(h5id%id)
     !
     if(allocated(h5id%norbK)) deallocate(h5id%norbK)
+    if(allocated(h5id%xk)) deallocate(h5id%xk)
     h5id%id = int(-1,kind=8)
     h5id%grid_type = -1
     h5id%nr1 = -1
@@ -238,18 +259,18 @@ MODULE read_orbitals_from_file
       kb = ik
     endif  
     !
-    CALL gk_sort (xksym (1:3, kb), ngm, g, ecutwfc / tpiba2, &
+    CALL gk_sort (h5id%xk (1:3, kb), ngm, g, ecutwfc / tpiba2, &
                   npw, igk(1), g2kin)
     !
     if(PRESENT(becpsi)) then
-      CALL init_us_2 (npw, igk(1), xksym(1,kb), vkb)
+      CALL init_us_2 (npw, igk(1), h5id%xk(1,kb), vkb)
     endif
     !
     do ibnd=1,nbands
       !
-      if( b_beg+ibnd-1 > h5id%norbK(kb+nksym*(ispin-1)) ) cycle 
+      if( b_beg+ibnd-1 > h5id%norbK(kb+h5id%nkpts*(ispin-1)) ) cycle 
       !
-      call esh5_posthf_read(h5id%id,kb-1+nksym*(ispin-1),b_beg+ibnd-2,1,evc,npwx,error)
+      call esh5_posthf_read(h5id%id,kb-1+h5id%nkpts*(ispin-1),b_beg+ibnd-2,1,evc,npwx,error)
       if(error .ne. 0 ) &
         call errore('psi_from_esh5','error reading orbital',1)
       !
@@ -400,7 +421,7 @@ MODULE read_orbitals_from_file
       call errore('get_psi_esh5',' ispin > h5id%nspin. ',1)   
     !
     buff(:)=(0.d0,0.d0)
-    ikk = ik + nksym*(ispin-1)
+    ikk = ik + h5id%nkpts*(ispin-1)
     call esh5_posthf_read(h5id%id,ikk-1,ibnd-1,1,buff,size(buff,1),error)
     if(error .ne. 0 ) &
       call errore('get_psi_esh5','error reading orbital',11)
@@ -438,9 +459,9 @@ MODULE read_orbitals_from_file
       deallocate(h5id%norbK)
       allocate(h5id%norbK(nksym*n_spins))
     endif
-    allocate( xkcart_(3,nksym) )
+    allocate( h5id%xk(3,nksym) )
     do ik=1,nksym
-      xkcart_(1:3,ik) = xksym(1:3,ik)*tpiba
+      h5id%xk(1:3,ik) = xksym(1:3,ik)*tpiba
     enddo
     recv(1:3,1:3) = bg(1:3,1:3) * tpiba
     at0(1:3,1:3) = at(1:3,1:3) * alat
@@ -448,13 +469,13 @@ MODULE read_orbitals_from_file
     CALL esh5_posthf_open_write(h5id%id,h5name,h5len, error)
     if(error .ne. 0 ) &
         call errore('open_esh5_write','error opening orbital file for write',1)
-    CALL esh5_posthf_write_meta(h5id%id,orbsG,5,nksym,n_spins,npol_,npwx,xkcart_, &
+    CALL esh5_posthf_write_meta(h5id%id,orbsG,5,nksym,n_spins,npol_,npwx,h5id%xk, &
                         1,dfft%nr1,dfft%nr2,dfft%nr3,at0,recv,alat,error)
     if(error .ne. 0 ) &
         call errore('open_esh5_write','error writing meta data OrbG',1)
     if(PRESENT(write_psir)) then
       if(write_psir) then
-        CALL esh5_posthf_write_meta(h5id%id,orbsR,5,nksym,n_spins,npol_,0,xkcart_, &
+        CALL esh5_posthf_write_meta(h5id%id,orbsR,5,nksym,n_spins,npol_,0,h5id%xk, &
                           0,dfft%nr1,dfft%nr2,dfft%nr3,at0,recv,alat,error)
         if(error .ne. 0 ) &
           call errore('pw2posthf','error writing meta data OrbR',1)
@@ -462,7 +483,6 @@ MODULE read_orbitals_from_file
     endif
     h5id%nspin = n_spins
     h5id%npol = npol_
-    deallocate(xkcart_)
   !  
   END SUBROUTINE open_esh5_write 
   !
@@ -475,6 +495,7 @@ MODULE read_orbitals_from_file
     call esh5_posthf_close_write(h5id)
     !
     if(allocated(h5id%norbK)) deallocate(h5id%norbK)
+    if(allocated(h5id%xk)) deallocate(h5id%xk)
     h5id%id = int(-1,kind=8)
     h5id%grid_type = -1
     h5id%nr1 = -1

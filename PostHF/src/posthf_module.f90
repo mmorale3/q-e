@@ -205,7 +205,7 @@ MODULE posthf_mod
       write(*,*) 'Found ',nQuniq,' Qpts in the irreducible subgroup.'
       do ik=1,nQuniq
         write(*,'(5x,2i5,f12.7)') ik,xQ(ik),wQ(ik)
-        write(*,'(8x,3f12.7)') (Qpts(j,xQ(ik)),j=1,3)
+        write(*,'(8x,3f12.7)') (Qpts(j,xQ(ik))*tpiba,j=1,3)
       enddo
     else
       write(*,*) 'Not using symmetry.'

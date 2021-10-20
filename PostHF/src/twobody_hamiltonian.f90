@@ -1,4 +1,4 @@
-!--------------------------------------------------------------------
+!-------------------------------------------------------------------i
 ! Written by Miguel A. Morales, LLNL, 2020 
 !--------------------------------------------------------------------
 !
@@ -31,7 +31,7 @@ MODULE twobody_hamiltonian
   USE mp_bands,     ONLY: nproc_bgrp
   USE noncollin_module,     ONLY : noncolin, npol
   USE lsda_mod, ONLY: lsda, nspin
-  USE read_orbitals_from_file, ONLY: get_orbitals_set
+  USE read_orbitals_from_file, ONLY: get_orbitals, get_orbitals_set
   use fft_interfaces,       ONLY : invfft, fwfft
   USE fft_types, ONLY: fft_type_descriptor
   USE posthf_mod, ONLY : ke_factorization
@@ -72,7 +72,7 @@ MODULE twobody_hamiltonian
     INTEGER :: maxv_rank,nke_dim,error,ibnd,ik,j, maxnorb
     REAL(DP), ALLOCATABLE :: xkcart(:,:)
     REAL(DP) :: dQ(3),dQ1(3),dk(3), dG(3, 27)
-    REAL(DP) :: pnorm, residual, maxv, fXX, fac, max_scl, rtemp, sqDuv
+    REAL(DP) :: residual, maxv, fXX, fac, max_scl, rtemp, sqDuv
     REAL(DP), ALLOCATABLE :: maxres(:)
     REAL(DP), ALLOCATABLE :: comm(:)
     COMPLEX(DP) :: ctemp, ctemp2, etemp, E1, max_scl_intg, err_(3)
@@ -120,6 +120,8 @@ MODULE twobody_hamiltonian
     call open_esh5_read(h5id_orbs,h5name)
     if( h5id_orbs%grid_type .ne. 1 ) &
       call errore('cholesky','grid_type ne 1',1)
+    if( h5id_orbs%nspin .ne. 1 ) &
+      call errore('cholesky','nspin ne 1',1)
     maxnorb = h5id_orbs%maxnorb
 
     nmax_DM = h5id_orbs%nmax_DM
@@ -258,7 +260,6 @@ MODULE twobody_hamiltonian
     !
     ! final normalization of 1.0/nksym applied later to keep thresh consistent 
     ! with single k-point case 
-    pnorm = 1.d0 / (dfft%nr1*dfft%nr2*dfft%nr3*nksym) 
     eX = (0.d0,0.d0)
     eJ = (0.d0,0.d0)
     eX_mf = (0.d0,0.d0)
@@ -975,6 +976,727 @@ MODULE twobody_hamiltonian
     if(nproc_image > 1) call mp_barrier( intra_image_comm )
 
   END SUBROUTINE cholesky_r
+  !
+  SUBROUTINE eri_df(thresh,dfft,hamil_file,orb_file,df_file)
+    USE parallel_include
+    USE ions_base,          ONLY : nat, ityp, ntyp => nsp
+    USE uspp,                    ONLY : okvan
+    USE paw_variables,           ONLY : okpaw
+    USE exx, ONLY: ecutfock
+    USE gvect,     ONLY : ecutrho
+    !
+    IMPLICIT NONE
+    !
+    TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
+    CHARACTER(len=*), INTENT(IN) :: hamil_file,orb_file,df_file
+    REAL(DP), INTENT(IN) :: thresh
+    !
+    CHARACTER(len=256) :: h5name
+    INTEGER :: h5len, oldh5
+    INTEGER :: numdf, naux, nqdf
+    INTEGER :: n1, n2, n3
+    INTEGER :: Q, Qp, ka, kb, iab, ia, ib, iu, iv, ku, kv, ni, nj, iuv
+    INTEGER :: i,n,m,ii,jj,kk, ia0, iu0, ispin, is1, is2, noa, nob
+    INTEGER :: a_beg, a_end, b_beg, b_end, ab_beg, ab_end, nabpair   ! assigned orbitals/pairs
+    INTEGER :: naorb, nborb, iabmax,nkloc,k_beg,k_end 
+    INTEGER :: error,ibnd,ik,j, maxnorb, many_ab
+    INTEGER, ALLOCATABLE :: Q2xk(:)
+    INTEGER, ALLOCATABLE :: g2g(:)
+    REAL(DP), ALLOCATABLE :: xkcart(:,:)
+    REAL(DP) :: fXX, fac, rtemp
+    REAL(DP) :: xk0(3), dQ(3), dG(3, 27)
+    COMPLEX(DP) :: ctemp, ctemp2, etemp, E1
+    LOGICAL :: more
+    ! Allocatables 
+    COMPLEX(DP), ALLOCATABLE :: orb(:) 
+    COMPLEX(DP), ALLOCATABLE :: Vpq(:,:)    
+    COMPLEX(DP), ALLOCATABLE :: Vinvpq(:,:)    
+    COMPLEX(DP), ALLOCATABLE :: Pab(:,:)    ! 3-center integrals in df basis 
+    COMPLEX(DP), ALLOCATABLE :: LPab(:,:)   ! factorized ERI  
+    COMPLEX(DP), ALLOCATABLE :: CPab(:,:)   ! factorized ERI  
+    ! Work Arrays
+    COMPLEX(DP), ALLOCATABLE :: T1(:,:)    
+    COMPLEX(DP), ALLOCATABLE :: T2(:,:)    
+    COMPLEX(DP), ALLOCATABLE :: T3(:,:)    
+    COMPLEX(DP), ALLOCATABLE :: PsiP(:,:)    ! DF basis in G space  
+    COMPLEX(DP), ALLOCATABLE :: Psia(:,:,:)    ! orbitals in real space
+    COMPLEX(DP), ALLOCATABLE :: Psib(:,:,:)    ! orbitals in real space
+    COMPLEX(DP), ALLOCATABLE :: Kp(:,:)        ! invfft[Psip(G) * v(G+Q)] * exp(iQr) 
+    COMPLEX(DP), ALLOCATABLE :: Tab(:,:)       ! Tab(r,pa) = conj(Psia(r)) * Psib(r) 
+    COMPLEX(DP), ALLOCATABLE :: phasefac(:,:)
+    COMPLEX(DP), ALLOCATABLE :: vCoulG(:)      ! 
+    COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
+    COMPLEX(DP), ALLOCATABLE :: v1(:,:)  
+    INTEGER, ALLOCATABLE :: nauxQ(:)
+    REAL(DP), ALLOCATABLE :: sval(:)
+    COMPLEX(DP)::eX,eJ,eX_mf,eJ_mf,eX2,eJ2
+    !
+    CHARACTER(len=4) :: str_me_image
+    TYPE(h5file_type) :: h5id_orbs, h5id_hamil, h5id_df 
+    !
+    if(okvan .or. okpaw) &
+      call errore('eri_df','No PAW or US allowed yet.',1)
+
+    if(thresh > 1.d-8) then
+      write(*,*) '\n*************************************************'
+      write(*,*) 'WARNING: SVD threshold in eri_df seems large.'
+      write(*,*) 'Consider using a smaller value, e.g. 1e-8.'
+      write(*,*) '*************************************************\n'
+    endif
+
+    ! open hamiltonian file
+    if(ionode) then
+      oldh5=1
+      h5name = TRIM(hamil_file) 
+    else
+      oldh5=0
+      WRITE ( str_me_image, '(I4)') me_image
+      h5name = TRIM(hamil_file) //"_part"//adjustl(trim(str_me_image))
+    endif
+    h5len = LEN_TRIM(h5name)
+    CALL esh5_posthf_open_file(h5id_hamil%id,h5name,h5len,oldh5)
+    if(oldh5 .ne. 0 ) &
+      call errore('eri_df','error opening hamil file',1)
+
+    ! open orbital file 
+    h5name = TRIM( orb_file ) 
+    call open_esh5_read(h5id_orbs,h5name)
+    if( h5id_orbs%grid_type .ne. 1 ) &
+      call errore('eri_df','grid_type ne 1',1)
+    if( h5id_orbs%nspin .ne. 1 ) &
+      call errore('eri_df','nspin ne 1',1)
+    maxnorb = h5id_orbs%maxnorb
+
+    ! open df file 
+    h5name = TRIM( df_file ) 
+    call open_esh5_read(h5id_df,h5name,.false.)
+    if( h5id_df%nspin .ne. 1 ) &
+      call errore('eri_df','nspin ne 1 in df file',1)
+    if( h5id_df%nkpts .ne. nksym ) &
+      call errore('eri_df','nkpts ne nksym in df file',1)
+    if( h5id_df%nr1*h5id_df%nr2*h5id_df%nr3 .ne. dfft%nnr ) &
+      call errore('eri_df','FFT grids do not match.',1)
+
+    allocate( Q2xk(nksym) )
+    do i=1,nksym
+      ! find h5id_df%xk in Qpts list, make sure it exists
+      ik=-1
+      do jj=1,nksym
+        if(sum( (h5id_df%xk(1:3,jj)-Qpts(1:3,i))**2 ) < 1.d-6) then
+          ik = jj 
+          exit
+        endif
+      enddo
+      if(ik > 0) then
+        Q2xk(i) = ik
+      else
+        write(*,*) '\n********************************************'
+        write(*,*) '                   ERROR'
+        write(*,*) '********************************************'
+        write(*,*) 'missing Qpt:',i,Qpts(1:3,i)*tpiba
+        write(*,*) 'Qpt grid in file: '
+          write(*,*) '   k,xk(:):'
+        do n=1,h5id_df%nkpts
+          write(*,*) '   ',n,h5id_df%xk(1:3,n)*tpiba
+        enddo
+        call errore('eri_df',' error: Q-point grids do not agree',1)
+      endif
+    enddo
+    numdf = maxval(h5id_df%norbK(:))
+    if(h5id_df%grid_type == 0) then
+      ! setup g2g mapping
+      allocate(g2g(dfft%nnr), orb(dfft%nnr))
+      n=1
+      do kk=0,h5id_df%nr3-1
+        n3 = kk
+        if( n3 > (h5id_df%nr3-1)/2 ) n3 = n3 - h5id_df%nr3 + dfft%nr3
+        do jj=0,h5id_df%nr2-1
+          n2 = jj
+          if( n2 > (h5id_df%nr2-1)/2 ) n2 = n2 - h5id_df%nr2 + dfft%nr2
+          do ii=0,h5id_df%nr1-1
+            n1 = ii
+            if( n1 > (h5id_df%nr1-1)/2 ) n1 = n1 - h5id_df%nr1 + dfft%nr1
+            ik = 1 + n1 + n2 * dfft%nr1x + n3 * dfft%nr1x * dfft%nr2x
+            g2g(n) = ik
+            n = n + 1
+          enddo
+        enddo
+      enddo
+    elseif(h5id_df%grid_type == 2) then
+      ! nothing to do
+    else
+      call errore('eri_df','unknown grid_type in df file',1)
+    endif
+
+    nmax_DM = h5id_orbs%nmax_DM
+    if( nmax_DM <= 0 ) &
+      call errore('cholesky','error nmax_DM <= 0',1)
+    if( allocated(DM) ) then
+      if( (size(DM,1).ne.nmax_DM) .or. &  
+          (size(DM,2).ne.nmax_DM) .or. &
+          (size(DM,3).ne.nksym) .or. &
+          (size(DM,4).ne.nspin) ) then  
+        deallocate(DM)
+        allocate( DM(nmax_DM, nmax_DM, nksym, nspin) )
+      endif 
+    else
+      allocate( DM(nmax_DM, nmax_DM, nksym, nspin) )
+    endif
+    if( allocated(DM_mf) ) then
+      if( (size(DM_mf,1).ne.nmax_DM) .or. &  
+          (size(DM_mf,2).ne.nmax_DM) .or. &
+          (size(DM_mf,3).ne.nksym) .or. &
+          (size(DM_mf,4).ne.nspin) ) then  
+        deallocate(DM_mf)
+        allocate( DM_mf(nmax_DM, nmax_DM, nksym, nspin) )
+      endif  
+    else
+      allocate( DM_mf(nmax_DM, nmax_DM, nksym, nspin) )
+    endif
+    do i=1,nspin
+      do ik=1,nksym
+        call esh5_posthf_read_dm(h5id_orbs%id,"DM",2,ik-1,i-1,DM(1,1,ik,i),error)
+        if(error .ne. 0 ) &
+          call errore('cholesky','error reading DM',1)
+        call esh5_posthf_read_dm(h5id_orbs%id,"DM_mf",5,ik-1,i-1,DM_mf(1,1,ik,i),error)
+        if(error .ne. 0 ) &
+          call errore('cholesky','error reading DM',1)
+      enddo
+    enddo
+
+    if(nspin == 1 ) then
+      fac = 2.d0 
+    else
+      fac = 1.d0 
+    endif
+
+    ! parallelization has restrictions
+    if(nproc_pool > 1 .and. npool .ne. nksym) &
+      call errore('pw2posthf','Error: nb > 1 only allowed if npools == nkstot',1) 
+
+    !   Partition k-points among MPI tasks
+    call fair_divide(k_beg,k_end,my_pool_id+1,npool,nksym)
+    nkloc   = k_end - k_beg + 1
+
+    !
+    ! Data Distribution setup
+    !   Partition orbital pairs:  Simple for now, find more memory friendly version
+    call fair_divide(ab_beg,ab_end,me_pool+1,nproc_pool,maxnorb*maxnorb)
+    nabpair = ab_end - ab_beg + 1
+
+    ! somewhat arbitrary
+    !many_ab = min(128, nabpair)  
+    many_ab = nabpair
+
+    !   Determine assigned orbitals
+! fix this
+!    a_beg   = (ab_beg-1)/maxnorb + 1
+!    a_end   = (ab_end-1)/maxnorb + 1
+    a_beg   = 1 
+    a_end   = maxnorb 
+    naorb   = a_end-a_beg+1
+    b_beg   = 1
+    b_end   = maxnorb   ! keeping all for simplicity now 
+    nborb   = b_end-b_beg+1
+
+    !  Allocate space for assigned orbitals in real space and corresponding
+    !  orbital pairs
+    allocate( Kp(dfft%nnr,numdf), Tab(dfft%nnr,many_ab), PsiP(dfft%nnr,numdf) ) 
+    allocate( Psia(dfft%nnr,naorb,1), Psib(dfft%nnr,nborb,1) )
+    allocate( T1(numdf,numdf), T2(numdf,numdf) ) 
+    allocate( Vinvpq(numdf,numdf), CPab(numdf, nabpair) )
+    allocate( Vpq(numdf,numdf), Pab(numdf,nabpair), LPab(numdf,nabpair) ) 
+    allocate( vCoulG(dfft%nnr) )
+    allocate( phasefac(dfft%nnr,27) )
+    allocate( nauxQ(nksym),  xkcart(3,nksym) )
+    allocate( spsi(1, 1), sval(numdf) )
+
+    ! fix with symmetry 
+    do ik=1,nksym
+      xkcart(1:3,ik) = xksym(1:3,ik)*tpiba
+    enddo
+
+    ! generate phase factors in real space, phasefac(ir,G) = exp(i*G*ir), 
+    ! where G are the Fourier frequencies with indexes {-1,0,1}, 27 in total 
+    ! if memory cost is too much, distribute over dfft%nnr and gather over proc
+    ! grid
+    CALL calculate_phase_factor(dfft, phasefac, dG)
+
+    if(ionode) write(*,*) 'Starting loop over Q vectors.'
+    !
+    ! 
+    ! Loop over Q points
+    !
+    eX = (0.d0,0.d0)
+    eJ = (0.d0,0.d0)
+    eX_mf = (0.d0,0.d0)
+    eJ_mf = (0.d0,0.d0)
+    do Q=1,1
+    !do Q=1,nksym
+
+      if( Q .gt. kminus(Q) ) cycle 
+      if( Q .eq. kminus(Q) ) then
+        fXX=1.d0
+      else
+        fXX=2.d0
+      endif
+      ! the Q-point of the basis function is -Q
+      Qp = kminus(Q)    
+
+      if(ionode) write(*,*) ' Q: ',Q
+      nqdf = h5id_df%norbK(Q2xk(Qp))
+
+      !!! MAM: right now there is no parallelization on the generation of
+      !!!      of V^{-1/2}. Distribute work among all procs 
+  
+      ! read df basis for kpt=Q  
+      ! need to use get_psi_esh5 since the orbital might need modifications
+      PsiP(:,:) = (0.d0,0.d0)
+      do ia=1,nqdf
+        if(h5id_df%grid_type == 0) then
+          call get_psi_esh5(h5id_df,ia,Q2xk(Qp),1,orb(:)) 
+          PsiP(g2g(1:dfft%nnr),ia) = orb(1:dfft%nnr)
+        elseif(h5id_df%grid_type == 2) then
+          call get_psi_esh5(h5id_df,ia,Q2xk(Qp),1,PsiP(:,ia)) 
+        endif
+        ! normalized in G-space on dfft grid.
+        call Overlap(1,1,dfft%nnr,(1.d0,0.d0),PsiP(1,ia),size(PsiP,1), &
+                       PsiP(1,ia),size(PsiP,1),(0.d0,0.d0),T1(1,1),1,  &
+                       .false.,spsi(:,1))
+        rtemp = 1.d0 / sqrt(dble(T1(1,1)))
+        PsiP(:,ia) = PsiP(:,ia) * rtemp
+      enddo
+
+      ! Setting up density fitting basis 
+      ! 1. calculate overlap matrix
+      T1(:,:) = (0.d0,0.d0)
+      call Overlap(nqdf,nqdf,dfft%nnr,(1.d0,0.d0),PsiP,size(PsiP,1), &
+                       PsiP,size(PsiP,1),(0.d0,0.d0),T1,size(T1,1),  &
+                       .false.,spsi)
+
+      ! 2. orthonormalize basis, assume linear dependencies 
+      call svdh(nqdf, t1, size(T1, 1), sval) 
+
+      ! build orthonormal basis 
+      naux=0
+      do ia = 1, nqdf 
+        if(sval(ia) .gt. thresh) then  
+          T1(:,ia)=T1(:,ia)/sqrt(sval(ia))
+          naux = naux + 1 
+        else
+          exit
+        endif
+      enddo
+      nauxQ(Q) = naux
+
+      ! rotate PsiP(:,q) = T1(p,q) PsiP(:,q)
+      allocate( T3(dfft%nnr, naux) )
+      call zgemm('N','N',dfft%nnr,naux,nqdf,(1.d0,0.d0),PsiP,dfft%nnr,  &
+                 T1,size(T1,1),(0.d0,0.d0),T3,dfft%nnr)
+      PsiP(:,1:naux) = T3
+      deallocate( T3 )
+
+      ! sanity check
+      call Overlap(naux,naux,dfft%nnr,(1.d0,0.d0),PsiP,size(PsiP,1), &
+                       PsiP,size(PsiP,1),(0.d0,0.d0),T1,size(T1,1),  &
+                       .false.,spsi)
+      do ii=1,naux
+        if( abs(T1(ii,ii)-1.d0) > 1.0d-8 )  then 
+          write(*,*) ii,T1(ii,ii)
+          call errore('eri_df','DF basis not orthonormal after rotation.',1)
+        endif
+        do jj=ii+1,naux
+          if( abs(T1(ii,jj)) > 1.0d-8 )  then 
+            write(*,*) ii,jj,T1(ii,jj)
+            call errore('eri_df','DF basis not orthonormal after rotation.',1)
+          endif
+        enddo
+      enddo
+
+      ! 3. Calculate coulomb matrix elements 
+      ! T1(p,q) = <PsiP(r,p) | v(r,r') | PsiP(r',q)> 
+      !         = sum_G conj(PsiP(G,p)) * v(G+Qp) * PsiP(G,q)
+      ! vCoulG( iG ) = | G + Qp |^{-2} = | G + Qp - 0  |^{-2}
+      xk0(1:3) = 0.d0
+      CALL g2_convolution(dfft%ngm, g, Qpts (1:3, Qp), xk0, psic) 
+
+      vCoulG(:) = (0.d0,0.d0)
+      vCoulG( dfft%nl(1:dfft%ngm) ) = e2Ha * psic(1:dfft%ngm)
+      if(gamma_only) vCoulG( dfft%nlm(1:dfft%ngm) ) = e2Ha * conjg(psic(1:dfft%ngm))
+
+      T1(:,:) = (0.d0,0.d0)
+      do ii=1,naux
+        do jj=ii,naux
+          ctemp=(0.d0,0.d0)
+          do n=1,dfft%nnr
+            ctemp=ctemp+conjg(PsiP(n,ii))*vCoulG(n)*PsiP(n,jj)
+          enddo
+          T1(ii,jj) = ctemp
+          if(jj > ii) T1(jj,ii) = conjg(ctemp)
+        enddo
+      enddo
+
+      ! 4. Calculate Vpq = T1^{-1/2} = T1^{-1} * T1^{1/2} = U s^{-1/2} U^+ 
+      call eigsys('V', 'U', .false., naux, size(T1,1), T1, sval)
+      T2(1:naux,1:naux) = T1(1:naux,1:naux)
+      do ia = 1, naux
+        T1(:,ia)=T1(:,ia)/sqrt(sval(ia))
+      enddo
+      call zgemm('N','C',naux,naux,naux,(1.d0,0.d0),T1,size(T1,1),  &
+                 T2,size(T2,1),(0.d0,0.d0),Vpq,size(Vpq,1))
+
+      ! Vinv
+      do ia = 1, naux
+        T1(:,ia)=T2(:,ia)/sval(ia)
+      enddo
+      call zgemm('N','C',naux,naux,naux,(1.d0,0.d0),T1,size(T1,1),  &
+                 T2,size(T2,1),(0.d0,0.d0),Vinvpq,size(Vinvpq,1))
+
+      if( Q==1 ) then
+        allocate( v1(naux,2) )
+        v1(:,:) = (0.d0,0.d0)
+      endif
+
+      ! calculate Kp(r) = invfft[ v(G+Qp) * PsiP(G) ] 
+      ! vCoulG( iG ) already calculated, reuse 
+      Kp(:,:)=(0.d0,0.d0)
+      do n=1,naux
+        !
+        ! multiply by FFT[ 1/r ]
+        do j = 1,dfft%nnr
+          Kp(j,n) = PsiP(j,n) * vCoulG(j) 
+        enddo
+
+        ! invfft kab to R
+        CALL invfft ('Rho', Kp(:,n), dfft)
+
+        ! add normalization 
+        Kp(1:dfft%nnr,n) = Kp(1:dfft%nnr,n) /  &
+              (dfft%nr1*dfft%nr2*dfft%nr3*sqrt(nksym*omega))
+        !
+      enddo
+
+      ! remove later on  
+      do n=1,naux  
+        CALL fwfft ('Rho', PsiP(:,n), dfft)
+      enddo  
+
+      do ik=1,nkloc
+
+        ! Q = ka - kb  !!! careful not to confuse Q with Qp 
+        ka = k_beg + ik - 1
+        kb = QKtoK2(Q, ka)
+        iabmax = h5id_orbs%norbK(ka)*h5id_orbs%norbK(kb)
+
+        ! dQ = Qba - Qp = kb - ka - Qpts(Qp) 
+        dQ(1:3) = xksym(1:3, kb) - xksym(1:3, ka) - Qpts(1:3,Qp) 
+        ii=0
+        do jj=1,27
+          if(sum( (dQ(1:3)-dG(1:3,jj))**2 ) .lt. 1.d-8) then
+            ii=jj
+            exit
+          endif
+        enddo
+        if(ii.lt.1) call errore('eri_df','Can not find dQ in G list.',1)
+
+        ! read orbitals, why read them all?
+        call get_orbitals_set(h5id_orbs, 'esh5','psir',dfft,&
+                    1,Psia,a_beg,naorb,ka,1)
+        call get_orbitals_set(h5id_orbs, 'esh5','psir',dfft,&
+                    1,Psib,b_beg,nborb,kb,1)
+ 
+        ! 5. Calculate Pab = (P|ab) 
+        !    (P|ab) = sum_r conjg(Kp(r)) * conjg(Psia(r)) * Psib(r) * exp(i*(kb-ka-Qp)*r),
+
+        ! add phase factor
+        do n=1,naux 
+          Kp(1:dfft%nnr,n) = Kp(1:dfft%nnr,n) * &
+                             phasefac(1:dfft%nnr, ii)
+        enddo
+
+        Pab(:,:)=(0.d0,0.d0)
+        do ibnd=1,nabpair,many_ab 
+
+          n = 0
+          do m=1,min(many_ab, nabpair-ibnd+1)
+
+            ! iab = (ia-1)*norbK(kb) + ib 
+            iab = ab_beg + ibnd - 1 + m - 1 
+            if(iab > iabmax) exit
+            ia = (iab-1)/h5id_orbs%norbK(kb) + 1
+            ib = MOD((iab-1), h5id_orbs%norbK(kb)) + 1
+
+            n=n+1
+            do j = 1,dfft%nnr
+              Tab(j,n) = conjg(Psia(j,ia-a_beg+1,1)) *  &
+                               Psib(j,ib-b_beg+1,1)        
+            enddo
+
+          enddo 
+
+          ! (P|ab) = Pab = sum_r' conj(Kp(r)) Tab(r) 
+          if(n > 0) then 
+            call zgemm('C','N',naux,n,dfft%nnr,               &
+                   (1.d0,0.d0),Kp,size(Kp,1),Tab,size(Tab,1), &
+                   (0.d0,0.d0),Pab(1,ibnd),size(Pab,1))
+          endif
+
+        enddo
+
+!        Pab(:,:)=(0.d0,0.d0)
+!        do ibnd=1,nabpair
+!          iab = ab_beg + ibnd - 1 
+!          if(iab > iabmax) exit
+!          ia = (iab-1)/h5id_orbs%norbK(kb) + 1
+!          ib = MOD((iab-1), h5id_orbs%norbK(kb)) + 1
+!          do n=1,naux
+!          do j=1,dfft%nnr
+!            Pab(n,ibnd) = Pab(n,ibnd) + conjg(Kp(j,n) * Psia(j,ia-a_beg+1,1) ) * Psib(j,ib-b_beg+1,1) 
+!          enddo
+!          enddo
+!        enddo
+
+        ! remove phase factor
+        do n=1,naux 
+          Kp(1:dfft%nnr,n) = Kp(1:dfft%nnr,n) / &
+                               phasefac(1:dfft%nnr, ii)
+        enddo
+
+        ! 6. Get ERI factorization: LPab = V^{-1/2} * (P|ab) = Vpq * Pab  
+        call zgemm('N','N',naux,nabpair,naux,                  &
+                 (1.d0,0.d0),Vpq,size(Vpq,1),Pab,size(Pab,1),  &
+                 (0.d0,0.d0),LPab,size(LPab,1))
+
+        call zgemm('N','N',naux,nabpair,naux,                  &
+                 (1.d0,0.d0),Vinvpq,size(Vinvpq,1),Pab,size(Pab,1),  &
+                 (0.d0,0.d0),CPab,size(CPab,1))
+
+!now output only the segment associated with nkloc
+
+!        write(*,*) 'Q,ki,kl,i,k,j,l,V:'
+!        do ia=1,2
+!        do ib=1,2
+!        do iu=1,2
+!        do iv=1,2
+            
+!          iab = (ia-1)*h5id_orbs%norbK(kb)+ib
+!          iuv = (iu-1)*h5id_orbs%norbK(kb)+iv
+!          ctemp = (0.d0,0.d0) 
+!          do n=1,naux
+!            ctemp = ctemp + LPab(n,iab) * conjg(LPab(n,iuv))
+!          enddo
+!          write(100+me_image,'(7i4,2g20.8)') Q,ka,ka,ia,ib,iv,iu,real(ctemp),imag(ctemp) 
+      
+!        enddo
+!        enddo
+!        enddo
+!        enddo
+        if(ka==1) then
+          ia=1
+          ib=1
+          iu=1
+          iv=1
+          iab = (ia-1)*h5id_orbs%norbK(kb)+ib
+          iuv = (iu-1)*h5id_orbs%norbK(kb)+iv
+          ctemp = (0.d0,0.d0) 
+          do n=1,naux
+            ctemp = ctemp + LPab(n,iab) * conjg(LPab(n,iuv))
+          enddo
+          write(*,'(7i4,2g20.8)') &
+          Q,ka,ka,ia,ib,iv,iu,real(ctemp),imag(ctemp)
+
+          T1(:,:) = (0.d0,0.d0)
+          do n=1,naux
+            PsiP(:,n) = PsiP(:,n)*sqrt(dfft%nnr*1.d0)
+            do j=1,dfft%nnr
+              T1(n,1) = T1(n,1) + PsiP(j,n)
+              T1(n,2) = T1(n,2) + conjg(PsiP(j,n))*PsiP(j,n)
+            enddo          
+            T1(n,1) = T1(n,1)
+            T1(n,2) = T1(n,2)
+            write(*,*) 'PsiP: ',n,T1(n,2)
+          enddo          
+
+          CPab(:,:) = (0.d0,0.d0)
+          do ibnd=1,nabpair
+            iab = ab_beg + ibnd - 1 
+            if(iab > iabmax) exit
+            ia = (iab-1)/h5id_orbs%norbK(kb) + 1
+            ib = MOD((iab-1), h5id_orbs%norbK(kb)) + 1
+            do j = 1,dfft%nnr
+              Tab(j,ibnd) = conjg(Psia(j,ia-a_beg+1,1)) *  &
+                                  Psib(j,ib-b_beg+1,1)
+            enddo
+          enddo
+          call zgemm('C','N',naux,nabpair,dfft%nnr,                  &
+                     (1.d0,0.d0),PsiP,size(PsiP,1),Tab,size(Tab,1),  &
+                     (0.d0,0.d0),CPab,size(CPab,1))
+
+          do ia=1,h5id_orbs%norbK(ka)
+          do ib=ia,ia
+            iab = (ia-1)*h5id_orbs%norbK(kb)+ib
+            ctemp=(0.d0,0.d0)
+            do n=1,naux
+              ctemp = ctemp + CPab(n,iab)*T1(n,1)
+            enddo
+            ctemp = ctemp/dfft%nnr
+            write(*,*) '   ',ia,ib,real(ctemp),imag(ctemp)    
+          enddo
+          enddo
+
+          do ia=1,h5id_orbs%norbK(ka)
+          do ib=ia,ia
+            iab = (ia-1)*h5id_orbs%norbK(kb)+ib
+            rtemp=(0.d0,0.d0)      
+            do j=1,dfft%nnr
+              ctemp2 = conjg( Psia(j,ia-a_beg+1,1) ) * Psib(j,ib-b_beg+1,1) 
+              etemp = (0.d0,0.d0)
+              do n=1,naux
+                etemp = etemp + CPab(n,iab) * PsiP(j,n) 
+              enddo
+write(200+ia,*) j,real(etemp),imag(etemp),real(ctemp2),imag(ctemp2)
+              ctemp2 = ctemp2 - etemp 
+              rtemp = rtemp + ctemp2 * conjg(ctemp2) 
+            enddo
+            rtemp = sqrt(rtemp/dfft%nnr)
+            write(*,*) '   ',ia,ib,rtemp
+          enddo
+          enddo
+
+        elseif(ka==2) then
+          ia=2
+          ib=2
+          iu=2
+          iv=2
+          iab = (ia-1)*h5id_orbs%norbK(kb)+ib
+          iuv = (iu-1)*h5id_orbs%norbK(kb)+iv
+          ctemp = (0.d0,0.d0) 
+          do n=1,naux
+            ctemp = ctemp + LPab(n,iab) * conjg(LPab(n,iuv))
+          enddo
+
+          rtemp=0.d0        
+          do j=1,dfft%nnr
+            ctemp2 = conjg( Psia(j,ia-a_beg+1,1) ) * Psib(j,ib-b_beg+1,1)         
+            do n=1,naux
+              ctemp2 = ctemp2 - CPab(n,iab) * PsiP(j,n)
+            enddo
+            rtemp = rtemp + abs(ctemp2)
+          enddo
+          rtemp = rtemp / dfft%nnr
+
+          write(*,'(7i4,3g20.8)') &
+          Q,ka,ka,ia,ib,iv,iu,real(ctemp),imag(ctemp),rtemp
+        elseif(ka>2) then
+          goto 991
+        endif
+
+        ! EJ  
+        if( Q == 1 ) then
+          ! accumulate EJ
+          noa = min(nmax_DM,h5id_orbs%norbK(ka))
+          nob = min(nmax_DM,h5id_orbs%norbK(kb))
+
+          do ibnd=1,nabpair
+            iab = ab_beg + ibnd - 1
+            if(iab > iabmax) exit
+            ia = (iab-1)/h5id_orbs%norbK(kb) + 1
+            ib = MOD((iab-1), h5id_orbs%norbK(kb)) + 1
+            if(ia > noa .or. ib > nob) cycle
+
+            do ispin=1,min(2,nspin)
+              !  
+              etemp = DM(ia,ib,ka,ispin)
+              v1(1:naux,1) = v1(1:naux,1) + LPab(1:naux,ibnd)*etemp
+              etemp = DM_mf(ia,ib,ka,ispin)
+              v1(1:naux,2) = v1(1:naux,2) + LPab(1:naux,ibnd)*etemp
+              !
+            enddo
+            !
+          enddo ! ibnd
+          !
+        endif ! Q==1
+
+      enddo ! ik
+
+      if(Q==1) then
+        !
+        call mp_sum(v1,intra_image_comm)
+        etemp = (0.d0,0.d0)
+        do j=1,naux
+          etemp = etemp + v1(j,1) * conjg(v1(j,1))
+        enddo
+        eJ = fXX * fac * fac * etemp
+        etemp = (0.d0,0.d0)
+        do j=1,naux
+          etemp = etemp + v1(j,2) * conjg(v1(j,2))
+        enddo
+        eJ_mf = fXX * fac * fac * etemp
+        !
+        deallocate(v1)
+      endif ! Q==1
+
+      if(ionode) write(*, *) ' Done with Q, naux(Q):',Q,nauxQ(Q)
+
+    enddo !Q
+
+    call mp_sum(eX,intra_image_comm)
+    call mp_sum(eX_mf,intra_image_comm)
+    if(ionode) then
+      write(*,*) 'EJ(1Det),EJ(MF) (Ha):',0.5d0*eJ/(nksym*1.0), &
+                0.5d0*eJ_mf/(nksym*1.0)
+      write(*,*) 'EXX(1Det),EXX(MF) (Ha):',0.5d0*eX/(nksym*1.0), &
+                0.5d0*eX_mf/(nksym*1.0)
+    endif
+
+    if(ionode) then
+      write(*,*) 'Timers: '
+    ENDIF
+991 continue
+
+
+    IF( ALLOCATED(Pab) ) DEALLOCATE (Pab)
+    IF( ALLOCATED(Vpq) ) DEALLOCATE (Vpq)
+    IF( ALLOCATED(Vinvpq) ) DEALLOCATE (Vinvpq)
+    IF( ALLOCATED(LPab) ) DEALLOCATE (LPab)
+    IF( ALLOCATED(CPab) ) DEALLOCATE (CPab)
+    IF( ALLOCATED(Tab) ) DEALLOCATE (Tab)
+    IF( ALLOCATED(T1) ) DEALLOCATE (T1)
+    IF( ALLOCATED(T2) ) DEALLOCATE (T2)
+    IF( ALLOCATED(T3) ) DEALLOCATE (T3)
+    IF( ALLOCATED(Psia) ) DEALLOCATE (Psia)
+    IF( ALLOCATED(Psib) ) DEALLOCATE (Psib)
+    IF( ALLOCATED(PsiP) ) DEALLOCATE (PsiP)
+    IF( ALLOCATED(Kp) ) DEALLOCATE (Kp)
+    IF( ALLOCATED(Q2xk) ) DEALLOCATE (Q2xk)
+    IF( ALLOCATED(vCoulG) ) DEALLOCATE (vCoulG)
+    IF( ALLOCATED(phasefac) ) DEALLOCATE (phasefac)
+    IF( ALLOCATED(xkcart) ) DEALLOCATE (xkcart)
+    IF( ALLOCATED(nauxQ) ) DEALLOCATE (nauxQ)
+    IF( ALLOCATED(g2g) ) DEALLOCATE (g2g)
+    IF( ALLOCATED(orb) ) DEALLOCATE (orb)
+    IF( ALLOCATED(spsi) ) DEALLOCATE (spsi)
+    IF( ALLOCATED(spsi) ) DEALLOCATE (spsi)
+    IF( ALLOCATED(v1) ) DEALLOCATE (v1)
+
+    if(me_image .ne. root_image) &
+      CALL esh5_posthf_close_file(h5id_hamil%id)
+    if(nproc_image > 1) call mp_barrier( intra_image_comm )
+
+    if(ionode) then
+      h5name = TRIM( hamil_file ) 
+      h5len = LEN_TRIM(h5name)
+      call esh5_posthf_join_all(h5id_hamil%id,h5name,h5len,nksym,nproc_image,error)
+      if(error .ne. 0) then
+        write(*,*) 'Error: ',error
+        call errore('pw2posthf','Error in esh5_posthf_join_all',1)
+      endif
+      CALL esh5_posthf_close_file(h5id_hamil%id)
+    endif
+    call close_esh5_read(h5id_orbs)
+    if(nproc_image > 1) call mp_barrier( intra_image_comm )
+
+  END SUBROUTINE eri_df
 
   ! calculate position dependent range parameter used in basis set correction scheme  
   ! assumes that Psia, DM and Chol have been calculated

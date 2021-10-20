@@ -859,7 +859,7 @@ void write_sparse_matrix(hid_t hg, const int nr, const int nc, const double* A)
 /** 
  */
 void F77_FUNC_(esh5_posthf_open_read,ESH5_POSTHF_OPEN_READ)
-    (hid_t* h_file, const char* fname, const int* length, const int* nk, int* norbK, int* nmax_dm, 
+    (hid_t* h_file, const char* fname, const int* length, int* nk, int* norbK, int* nmax_dm, 
      int* nspin, int* npol, int* npwx,
      double* xk, int* grid_type, int* nr1, int* nr2, int* nr3, double* recvec, int* error)
 {
@@ -914,10 +914,8 @@ void F77_FUNC_(esh5_posthf_open_read,ESH5_POSTHF_OPEN_READ)
   ret=H5LTread_dataset(h_orb_grp_read,"grid_type",H5T_NATIVE_INT,grid_type);
   if(ret<0){*error=1;printf("esh5 problems reading grid_type\n");return;}   
 
-  int nkpts;
-  ret=H5LTread_dataset(h_orb_grp_read,"number_of_kpoints",H5T_NATIVE_INT,&nkpts);
+  ret=H5LTread_dataset(h_orb_grp_read,"number_of_kpoints",H5T_NATIVE_INT,nk);
   if(ret<0){*error=1;printf("esh5 problems reading number_of_kpoints\n");return;}   
-  if(nkpts!=(*nk)){*error=1;printf("esh5 Inconsistent #kpts in file\n");return;}   
 
   ret=H5LTread_dataset(h_orb_grp_read,"kpoints",H5T_NATIVE_DOUBLE,xk);
   if(ret<0){*error=1;printf("esh5 problems reading kpoints\n");return;}   

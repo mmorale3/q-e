@@ -469,7 +469,7 @@ subroutine pyscf_driver_mp2(out_prefix_,diag,diag_type,nread_from_h5, &
 end subroutine pyscf_driver_mp2
 
 subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
-       ndet, eigcut, nextracut, thresh, ncholmax, &
+       h5_df_basis_, ndet, eigcut, nextracut, thresh, ncholmax, &
        get_hf, get_mp2, update_qe_bands, ehf, emp2)
   !
   USE mp_global, ONLY : nimage, nproc_image, me_image, root_image, &
@@ -486,7 +486,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   USE orbital_generators, ONLY: generate_orbitals,write_trial_wavefunction, &
                                 diag_hf, verbose, davcio_to_esh5
   USE onebody_hamiltonian, ONLY: getH1
-  USE twobody_hamiltonian, ONLY: cholesky_r, calculate_KS_bscorr
+  USE twobody_hamiltonian, ONLY: cholesky_r, calculate_KS_bscorr, eri_df
   USE mp2_module, ONLY: mp2_g,mp2no,approx_mp2no
 #if defined(__CUDA)
   USE mp2_module, ONLY: mp2_gpu
@@ -498,6 +498,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   IMPLICIT NONE
   !
   CHARACTER(len=*), INTENT(IN) :: h5_add_orbs_,out_prefix_
+  CHARACTER(len=*), INTENT(IN) :: h5_df_basis_
   REAL(kind=8), INTENT(IN) :: eigcut, nextracut, thresh, ncholmax
   LOGICAL, INTENT(IN) :: get_hf, get_mp2,update_qe_bands
   INTEGER, INTENT(IN) :: nread_from_h5, ndet
@@ -508,6 +509,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   COMPLEX(DP), ALLOCATABLE :: M(:,:,:,:)  ! Overlap between basis states and
                                             ! occupied KS states. 
   CHARACTER(len=256) :: out_prefix, h5_add_orbs, h5qeorbs
+  CHARACTER(len=256) :: h5_df_basis 
   CHARACTER(len=256) :: hamilFile,orbsFile,canOrbsFile
   COMPLEX(DP) :: e1, e1_so, e2_mp2, e1_mf, e1_so_mf
   TYPE(h5file_type) :: h5id_hamil,h5id_orbs
@@ -517,6 +519,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   !
   out_prefix = TRIM(out_prefix_)
   h5_add_orbs = TRIM(h5_add_orbs_)
+  h5_df_basis = TRIM(h5_df_basis_)
   hamilFile = TRIM( tmp_dir )//TRIM( out_prefix ) // '.hamil.h5'
   orbsFile = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.orbitals.h5'
   canOrbsFile = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.canonical.orbitals.h5'
@@ -603,7 +606,12 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   ! calculate cholesky matrix  
 ! note: you can construct FockM here if you want, it would be 
 !       quite cheap. Add it as an optional
-  call cholesky_r(ncholmax,thresh,dffts,hamilFile,orbsFile)
+  if(h5_df_basis .ne. '') then
+    write(*,*)' Calculating factorized 2-electron integrals using density fitting. ' 
+    call eri_df(thresh,dffts,hamilFile,orbsFile,h5_df_basis)
+  else
+    call cholesky_r(ncholmax,thresh,dffts,hamilFile,orbsFile)
+  endif
 
   ! mp2 requires hf rediag
   if(get_hf .or. get_mp2) then

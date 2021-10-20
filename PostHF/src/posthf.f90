@@ -31,13 +31,14 @@ PROGRAM posthf
   REAL(DP) :: qnorm_
   ! directory for temporary files
   CHARACTER(len=256) :: outdir, out_prefix, h5_add_orbs, run_type, diag_type
+  CHARACTER(len=256) :: h5_df_basis
   CHARACTER(len=256) :: exxdiv_treatment 
   !
   CHARACTER(LEN=256), EXTERNAL :: trimcheck
 
   NAMELIST / inputpp / prefix, outdir, write_psir, expand_kp, debug, & 
             ndet, ncholmax,thresh, number_of_orbitals,eigcut_occ, eigcut, out_prefix, verbose, & 
-            h5_add_orbs, nskipvir,low_memory, get_hf,get_mp2,use_symm, &
+            h5_add_orbs, h5_df_basis, nskipvir,low_memory, get_hf,get_mp2,use_symm, &
             regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment
 #ifdef __MPI
   CALL mp_startup ( )
@@ -69,6 +70,7 @@ PROGRAM posthf
   low_memory = .false.
   update_qe_bands = .false.
   h5_add_orbs = '' 
+  h5_df_basis = ''
   nskipvir=0
   read_from_h5=-1
   nextracut=-1.0
@@ -109,6 +111,7 @@ PROGRAM posthf
   CALL mp_bcast(run_type, ionode_id, world_comm ) 
   CALL mp_bcast(diag_type, ionode_id, world_comm )
   CALL mp_bcast(h5_add_orbs, ionode_id, world_comm ) 
+  CALL mp_bcast(h5_df_basis, ionode_id, world_comm ) 
   CALL mp_bcast(nskipvir, ionode_id, world_comm ) 
   CALL mp_bcast(low_memory, ionode_id, world_comm ) 
   CALL mp_bcast(read_from_h5, ionode_id, world_comm ) 
@@ -151,7 +154,7 @@ PROGRAM posthf
   ! "options" object
   CALL pp_posthf(out_prefix,number_of_orbitals, expand_kp, thresh, &
        eigcut, eigcut_occ, nextracut, ncholmax, ndet, nskipvir, run_type, diag_type, write_psir, update_qe_bands, &
-       h5_add_orbs, read_from_h5, get_hf, get_mp2, use_symm, exxdiv_treatment, regp, regkappa, &
+       h5_add_orbs, h5_df_basis, read_from_h5, get_hf, get_mp2, use_symm, exxdiv_treatment, regp, regkappa, &
        low_memory, verbose, debug)
   !
 #else
@@ -167,7 +170,7 @@ END PROGRAM posthf
 SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
                           occeigcut, nextracut,  &
                           ncmax, ndet, nskipvir, run_type, diag_type, &
-                          write_psir, update_qe_bands, h5_add_orbs, read_from_h5, &
+                          write_psir, update_qe_bands, h5_add_orbs, h5_df_basis, read_from_h5, &
                           get_hf, get_mp2, use_symm, exxdiv_treatment, regp, regkappa, low_memory, &
                           verbose, debug) 
 
@@ -234,6 +237,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   LOGICAL, INTENT(IN) :: expand_kp, debug, verbose, write_psir, use_symm
   LOGICAL, INTENT(IN) :: low_memory, update_qe_bands, get_hf, get_mp2
   CHARACTER(len=256), INTENT(IN) :: h5_add_orbs, run_type, diag_type, exxdiv_treatment
+  CHARACTER(len=256), INTENT(IN) :: h5_df_basis 
   INTEGER :: ibnd, ik, j
   INTEGER :: ios, ierr, h5len,oldh5,ig_c,save_complex
   CHARACTER(256) :: tmp,tmp2,h5name,out_prefix,h5qeorbs
@@ -438,6 +442,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   elseif(TRIM(run_type) == 'hamil') then  
 
     call pyscf_driver_hamil(out_prefix, read_from_h5, h5_add_orbs, &
+       h5_df_basis, &
        ndet, eigcut, nextracut, thresh, ncmax, &
        get_hf, get_mp2, update_qe_bands, e1, emp2)
     if(get_hf) &
