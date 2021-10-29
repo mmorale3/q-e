@@ -118,6 +118,8 @@ MODULE mp2_module
     if(present(reg_expo)) regkappa = max(0.d0,reg_expo) 
     regularize = (regkappa > 0.d0) 
 
+    write(*,*) '\n\nStarting MP2 calculation. '
+
     nxxs = dfft%nr1x*dfft%nr2x*dfft%nr3x
 
     if(nspin == 1 ) then
@@ -646,7 +648,6 @@ MODULE mp2_module
             eQ(iq,1)/wQ(iq),eQ(iq,2)/wQ(iq)
       enddo
       !
-      write(*,*)
       !
       CALL print_clock ( 'mp2_Kia' )
       CALL print_clock ( 'mp2_io' )
@@ -654,6 +655,8 @@ MODULE mp2_module
       CALL print_clock ( 'mp2_abij' )
       !
     ENDIF
+    write(*,*) ' ************************************** '
+    write(*,*)
 
     if(allocated(norbK)) deallocate(norbK)
     IF( ALLOCATED(Kia) ) DEALLOCATE (Kia)
@@ -788,6 +791,9 @@ MODULE mp2_module
     integer :: istat
     istat = cublasCreate(handle_cublas)
     if (istat .ne. CUBLAS_STATUS_SUCCESS) print *,istat
+
+    write(*,*) '\n\nStarting MP2 calculation. '
+
     ! fix this!!!
     call start_clock( 'mp2_setup' )
     many_fft = 16
@@ -1332,6 +1338,8 @@ MODULE mp2_module
     endif
     if(nproc_image > 1) CALL mp_sum ( emp2, intra_image_comm ) 
     if(nproc_image > 1) CALL mp_sum ( eQ, intra_image_comm ) 
+    write(*,*)
+    write(*,*) ' ************************************** '
     write(*,*) '  EMP2 (Ha): ',emp2
     write(*,*) '  EJ (Ha): ',sum(eQ(:,1))
     write(*,*) '  EX (Ha): ',sum(eQ(:,2))
@@ -1341,8 +1349,6 @@ MODULE mp2_module
         write(*,'(i5,g14.8,"("g14.6,g14.6")","("g14.6,g14.6")")') iq,wQ(iq),&
             eQ(iq,1)/wQ(iq),eQ(iq,2)/wQ(iq)
       enddo
-      !
-      WRITE( 6, * )
       !
       CALL print_clock ( 'mp2_setup' )
       CALL print_clock ( 'mp2_Kia' )
@@ -1354,6 +1360,8 @@ MODULE mp2_module
       CALL print_clock ( 'mp2_abij' )
       !
     ENDIF
+    write(*,*) ' ************************************** '
+    write(*,*)
 
     if(allocated(norbK)) deallocate(norbK)
     IF( ALLOCATED(Kib) ) DEALLOCATE (Kib)

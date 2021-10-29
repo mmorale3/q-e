@@ -940,6 +940,7 @@ MODULE twobody_hamiltonian
     IF( ALLOCATED(maxres) ) DEALLOCATE (maxres)
     IF( ALLOCATED(xkcart) ) DEALLOCATE (xkcart)
     IF( ALLOCATED(comm) ) DEALLOCATE (comm)
+    IF( ALLOCATED(GChol) ) DEALLOCATE (GChol)
     IF( ALLOCATED(ncholQ) ) DEALLOCATE (ncholQ)
     if(allocated(paw_one_center)) deallocate(paw_one_center)
     if(okvan) then
@@ -975,6 +976,713 @@ MODULE twobody_hamiltonian
     if(nproc_image > 1) call mp_barrier( intra_image_comm )
 
   END SUBROUTINE cholesky_r
+  !
+  ! Specialized routine to generate Cholesky factorizations of 2-ERI directly on
+  ! the MO basis. The resulting Cholesky vectors will have a spin dependence to
+  ! account for the various spin sectors.
+  ! This routine is meant to be used in MP2/RPA/etc calculations, where only the
+  ! occ-vir and vir-occ sectors of the factorized tensor is needed. For this
+  ! reason, the routine only calculates 2 sectors of the matrix, given a number
+  ! of MOs (nmax in what follows), typically given by the largest occupied state, the routine
+  ! calculates only the sectors: [ {1:nmax}, {1:M} ] and [ {nmax+1:M}, {0:nmax}], where M is
+  ! the number of states in the basis.
+  !   -  The same nmax is used for all k-points.
+  !   -  A packed structure of the pair indexes is used, where the 2 sectors are
+  !   packed contiguously 
+  !
+  SUBROUTINE cholesky_MO(noccmax,ncmax,thresh,dfft,hamil_file,orb_file)
+    !
+    USE control_flags,        ONLY : use_gpu
+    !
+    IMPLICIT NONE
+    !
+    INTEGER, INTENT(IN) :: noccmax
+    TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
+    CHARACTER(len=*), INTENT(IN) :: hamil_file,orb_file
+    REAL(DP), INTENT(IN) :: ncmax, thresh
+    !
+#if defined(__CUDA)
+!      if(use_gpu) then
+!        call 
+!      else
+        call cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file) 
+!      endif
+#else
+      call cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file) 
+#endif            
+    !
+  END SUBROUTINE cholesky_MO
+  !
+  SUBROUTINE cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file)
+    USE parallel_include
+    USE ions_base,          ONLY : nat, ityp, ntyp => nsp
+    USE uspp,                    ONLY : okvan
+    USE paw_variables,           ONLY : okpaw
+    USE exx, ONLY: ecutfock
+    USE gvect,     ONLY : ecutrho
+    !
+    IMPLICIT NONE
+    !
+    INTEGER, INTENT(IN) :: noccmax
+    TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
+    CHARACTER(len=*), INTENT(IN) :: hamil_file,orb_file
+    REAL(DP), INTENT(IN) :: ncmax, thresh
+    !
+    CHARACTER(len=256) :: h5name
+    INTEGER :: n_spin, nchol_max, nchol, h5len, oldh5
+    INTEGER :: Q, ka, kb, iab, ia, ib, iu, iv, ku, kv, ni, nj, iuv
+    INTEGER :: i, ii,jj,kk, ia0, iu0, ispin, is1, is2, noa, nob
+    INTEGER :: a_beg, a_end, b_beg, b_end, ab_beg, ab_end, nabpair   ! assigned orbitals/pairs
+    INTEGER :: naorb, nborb, iabmax,nkloc,k_beg,k_end 
+    INTEGER :: maxv_rank,error,ibnd,ik,ikk,j, maxnorb
+    REAL(DP), ALLOCATABLE :: xkcart(:,:)
+    REAL(DP) :: dQ(3),dQ1(3),dk(3), dG(3, 27)
+    REAL(DP) :: pnorm, residual, maxv, fXX, fac, max_scl, rtemp, sqDuv
+    REAL(DP), ALLOCATABLE :: maxres(:)
+    REAL(DP), ALLOCATABLE :: comm(:)
+    COMPLEX(DP) :: ctemp, ctemp2, etemp, E1, max_scl_intg, err_(3)
+    LOGICAL :: more
+    ! QPOINT stuff
+    COMPLEX(DP), ALLOCATABLE :: Chol(:,:,:,:)    ! Cholesky Matrix 
+    COMPLEX(DP), ALLOCATABLE :: Psia(:,:,:,:)    ! orbitals in real space
+    COMPLEX(DP), ALLOCATABLE :: Psib(:,:,:,:)    ! orbitals in real space
+    COMPLEX(DP), ALLOCATABLE :: Diag(:,:,:)      ! Diagonal of Residual Matrix 
+    COMPLEX(DP), ALLOCATABLE :: Kqab(:,:,:,:)    ! Exchange potential in real space
+    COMPLEX(DP), ALLOCATABLE :: phasefac(:,:)
+    COMPLEX(DP), ALLOCATABLE :: Vuv(:)         ! 
+    COMPLEX(DP), ALLOCATABLE :: Vuv2(:)        ! 
+    COMPLEX(DP), ALLOCATABLE :: vCoulG(:)      ! 
+    COMPLEX(DP), ALLOCATABLE :: v1(:,:)  ! 
+    REAL(DP), ALLOCATABLE :: eigval(:,:),weight(:,:)
+    INTEGER, ALLOCATABLE :: ncholQ(:)
+    COMPLEX(DP)::eX,eJ,eX2,eJ2
+    !
+    CHARACTER(len=4) :: str_me_image
+    TYPE(h5file_type) :: h5id_orbs, h5id_hamil 
+    !
+
+    if(okpaw .or. okvan) &
+      call errore('cholesky_MO_cpu','No USPP or PAW on cholesky_MO yet.',1)
+
+    ! open hamiltonian file
+    if(ionode) then
+      oldh5=1
+      h5name = TRIM(hamil_file) 
+    else
+      oldh5=0
+      WRITE ( str_me_image, '(I4)') me_image
+      h5name = TRIM(hamil_file) //"_part"//adjustl(trim(str_me_image))
+    endif
+    h5len = LEN_TRIM(h5name)
+    CALL esh5_posthf_open_file(h5id_hamil%id,h5name,h5len,oldh5)
+    if(oldh5 .ne. 0 ) &
+      call errore('cholesky','error opening hamil file',1)
+
+    ! open orbital file 
+    h5name = TRIM( orb_file ) 
+    call open_esh5_read(h5id_orbs,h5name)
+    if( h5id_orbs%grid_type .ne. 1 ) &
+      call errore('cholesky','grid_type ne 1',1)
+    maxnorb = h5id_orbs%maxnorb
+    n_spin = h5id_orbs%nspin
+    allocate(weight(maxnorb,nkstot),eigval(maxnorb,nkstot))
+    weight(:,:) = 0.d0
+    eigval(:,:) = 0.d0
+    do ik=1,nkstot
+      call esh5_posthf_read_et(h5id_orbs%id,ik-1,eigval(1,ik), &
+                               weight(1,ik),error)
+      if(error .ne. 0 ) &
+        call errore('cholesky_MO','error reading weights',1)
+    enddo
+
+    if(nspin == 1 ) then
+      fac = 2.d0 
+    else
+      fac = 1.d0 
+    endif
+
+    ! parallelization has restrictions
+    if(nproc_pool > 1 .and. npool .ne. nksym) &
+      call errore('pw2posthf','Error: nb > 1 only allowed if npools == nkstot',1) 
+
+    !   Partition k-points among MPI tasks
+    call fair_divide(k_beg,k_end,my_pool_id+1,npool,nksym)
+    nkloc   = k_end - k_beg + 1
+
+    !
+    ! Data Distribution setup
+    !   Partition orbital pairs:  Simple for now, find more memory friendly version
+    call fair_divide(ab_beg,ab_end,me_pool+1,nproc_pool,2*noccmax*maxnorb-noccmax*noccmax)
+    nabpair = ab_end - ab_beg + 1
+    !   Determine assigned orbitals
+! fix this!!!!
+!    a_beg   = (ab_beg-1)/maxnorb + 1
+!    a_end   = (ab_end-1)/maxnorb + 1
+    a_beg   = 1 
+    a_end   = maxnorb 
+    naorb   = a_end-a_beg+1
+    b_beg   = 1
+    b_end   = maxnorb   ! keeping all for simplicity now 
+    nborb   = b_end-b_beg+1
+
+    ! maximum number of cholesky vectors allowed, 
+    ! must be sufficient to reach thresh
+    nchol_max = int(ncmax*maxnorb)
+
+    !  Allocate space for assigned orbitals in real space and corresponding
+    !  orbital pairs
+    allocate( Kqab(dfft%nnr,nabpair,nkloc,n_spin), Chol(nchol_max,nabpair,nkloc,n_spin) )
+    allocate( Psia(dfft%nnr,naorb,nkloc,n_spin), Psib(dfft%nnr,nborb,nkloc,n_spin) )
+    allocate( vCoulG(dfft%nnr) )
+    allocate( Diag(nabpair,nkloc,n_spin) )
+    allocate( phasefac(dfft%nnr,27) )
+    allocate( maxres(nchol_max), comm(nproc_image*5) )
+    allocate( ncholQ(nksym),  xkcart(3,nksym) )
+
+    ! fix with symmetry 
+    do ik=1,nksym
+      xkcart(1:3,ik) = xksym(1:3,ik)*tpiba
+    enddo
+
+    if(ionode) write(*,*) 'Generating orbitals in real space'
+
+    do ispin=1,n_spin
+      call get_orbitals_set(h5id_orbs, 'esh5','psir',dfft,&
+                  ispin,Psia(:,:,:,ispin),a_beg,naorb,k_beg,nkloc)
+    enddo
+    ! allocate Vuv/Vuv2 now
+    allocate( Vuv(dfft%nnr+nchol_max), Vuv2(dfft%nnr) )
+
+    ! generate phase factors in real space, phasefac(ir,G) = exp(i*G*ir), 
+    ! where G are the Fourier frequencies with indexes {-1,0,1}, 27 in total 
+    ! if memory cost is too much, distribute over dfft%nnr and gather over proc grid
+    CALL calculate_phase_factor(dfft, phasefac, dG)
+
+    CALL start_clock ( 'orb_cholesky' )
+    if(ionode) write(*,*) 'Starting loop over Q vectors.'
+    !
+    ! 
+    ! Loop over Q points
+    !
+    ! final normalization of 1.0/nksym applied later to keep thresh consistent 
+    ! with single k-point case 
+    pnorm = 1.d0 / (dfft%nr1*dfft%nr2*dfft%nr3*nksym) 
+    eX = (0.d0,0.d0)
+    eJ = (0.d0,0.d0)
+    do Q=1,nksym
+
+      if( Q .gt. kminus(Q) ) cycle 
+      if( Q .eq. kminus(Q) ) then
+        fXX=1.d0
+      else
+        fXX=2.d0
+      endif
+      max_scl_intg = (0.d0,0.d0) 
+      max_scl = 0.d0
+
+      if(ionode) write(*,*) ' Q: ',Q
+      if(ionode) write(*,*) '  --  Generating orbitals in real space'
+      ! 
+      ! 0. Generate 'b' orbitals in real space
+      !
+      do ispin=1,n_spin
+        call get_orbitals_set(h5id_orbs, 'esh5','psir',dfft,&
+                    ispin,Psib(:,:,:,ispin),b_beg,nborb,k_beg,nkloc,Q,QKtoK2)
+      enddo
+
+      ! 
+      ! Generate exchange matrix Kab(r) 
+      !
+      if(ionode) write(*,*) '  --  Generating exchange matrix Kab(r)'
+
+      ! 1. Construct orbital pairs in R 
+      ! 2. fwfft to G 
+      ! 3. Multiply orbital pairs by FFT[ 1/r ]  
+      ! 4. invfft back to R
+      Kqab(:,:,:,:)=(0.d0,0.d0)
+      do ik=1,nkloc
+
+        ka = k_beg + ik - 1  
+        kb = QKtoK2(Q, ka)
+        iabmax = noccmax*(h5id_orbs%norbK(ka) + h5id_orbs%norbK(kb)) - noccmax*noccmax
+
+        ! vCoulG( iG ) = | G - Q |^{-2} = | G + k(kb) - k(ka)  |^{-2}
+        CALL g2_convolution(dfft%ngm, g, xksym (1:3, kb), xksym (1:3, ka), psic)  
+        vCoulG(:) = (0.d0,0.d0)
+        vCoulG( dfft%nl(1:dfft%ngm) ) = e2Ha * psic(1:dfft%ngm) 
+        if(gamma_only) vCoulG( dfft%nlm(1:dfft%ngm) ) = e2Ha * conjg(psic(1:dfft%ngm))
+
+        do ibnd=1,nabpair
+
+          iab = ab_beg + ibnd - 1 
+          if(iab > iabmax) exit 
+          call iab_to_ia_ib(iab,ia,ib,h5id_orbs%norbK(kb),noccmax)
+
+          do ispin=1,n_spin
+
+            do j = 1,dfft%nnr
+              Kqab(j,ibnd,ik,ispin) = CONJG(Psia(j,ia-a_beg+1,ik,ispin)) * &
+                                            Psib(j,ib-b_beg+1,ik,ispin) / omega
+            enddo
+
+            ! fwfft orbital pairs to G
+            CALL fwfft ('Rho', Kqab(:,ibnd,ik,ispin), dfft)
+
+            ! multiply by FFT[ 1/r ]
+            do j = 1,dfft%nnr   
+              Kqab(j,ibnd,ik,ispin) = Kqab(j,ibnd,ik,ispin) * vCoulG(j) 
+            enddo
+
+            ! invfft kab to R
+            CALL invfft ('Rho', Kqab(:,ibnd,ik,ispin), dfft)
+
+            ! add normalization here, why not!
+            Kqab(1:dfft%nnr,ibnd,ik,ispin) = Kqab(1:dfft%nnr,ibnd,ik,ispin)/  & 
+                  (dfft%nr1*dfft%nr2*dfft%nr3*nksym) 
+      
+          enddo
+
+        enddo
+
+      end do
+
+      if(ionode) write(*,*) '  --  Constructing Diagonal of Residual Matrix '
+      Diag(:,:,:)=(0.d0,0.d0)
+      iu=-1 
+      iv=-1 
+      ku=-1 
+      maxv=0.d0
+      is1=-1  
+      do ik=1,nkloc
+
+        ka = k_beg + ik - 1  
+        kb = QKtoK2(Q, ka)
+        iabmax = noccmax*(h5id_orbs%norbK(ka) + h5id_orbs%norbK(kb)) - noccmax*noccmax
+
+        do ibnd=1,nabpair
+
+          iab = ab_beg + ibnd - 1
+          if(iab > iabmax) exit 
+          call iab_to_ia_ib(iab,ia,ib,h5id_orbs%norbK(kb),noccmax)
+
+          do ispin=1,n_spin
+
+            ! (ab|cd) = kab(r) * conjg(Psi(b,r)) * Psi(a,r)
+            ! Diag(a,b) = (ab|ba)  
+            do j = 1,dfft%nnr
+              Diag(ibnd,ik,ispin) = Diag(ibnd,ik,ispin) + Kqab(j, ibnd, ik, ispin) * & 
+                            CONJG(Psib(j,ib-b_beg+1,ik,ispin)) * Psia(j,ia-a_beg+1,ik,ispin) 
+            enddo        
+            if( Aimag(Diag(ibnd,ik,ispin)) .gt. 1.d-9 ) &
+              write(*,*) 'WARNING: Complex diagonal term: ',Q,ik, &
+                                ia,ib,Diag(ibnd,ik,ispin)
+            if( Dble(Diag(ibnd,ik,ispin)) .lt. -1.d-12 ) &
+              write(*,*) 'WARNING: Negative diagonal term: ',Q,ik, &
+                                ia,ib,Diag(ibnd,ik,ispin)
+            ! enforce positive, real diagonal matrix  
+            Diag(ibnd,ik,ispin) = CMPLX( abs(Dble(Diag(ibnd,ik,ispin))), 0.d0, kind=DP)   
+            if( abs(Diag(ibnd,ik,ispin)) .gt. maxv ) then
+              maxv = abs(Diag(ibnd,ik,ispin))
+              iu = ia
+              iv = ib
+              ku = ka
+              is1 = ispin  
+            endif
+
+          enddo !ispin
+
+        enddo ! ibnd
+
+      enddo
+
+      maxv_rank=0
+      if(nproc_image > 1) then
+        comm( 5*me_image+1 ) = maxv
+        comm( 5*me_image+2 ) = iu
+        comm( 5*me_image+3 ) = iv
+        comm( 5*me_image+4 ) = ku
+        comm( 5*me_image+5 ) = is1
+#if defined (__MPI)
+        call MPI_ALLGATHER( MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, &
+                            comm, 5, MPI_DOUBLE_PRECISION, intra_image_comm, error) 
+        if(error .ne. 0) &
+          call errore('pw2posthf','Error: mpi_allgather',error)
+#else
+        call errore('pw2posthf','Error: undefined __MPI',error)
+#endif
+        maxv=0.d0
+        do i=0,nproc_image-1
+          if( comm( 5*i+1 ) > maxv ) then
+            maxv_rank=i
+            maxv = comm( 5*i+1 )
+          endif  
+        enddo
+        iu = comm( 5*maxv_rank+2 )
+        iv = comm( 5*maxv_rank+3 )
+        ku = comm( 5*maxv_rank+4 )
+        is1 = comm( 5*maxv_rank+5 )
+        if( maxv_rank < 0 .or. maxv_rank >= nproc_image ) then
+          write(*,*) 'maxv_rank out of bounds: ',maxv_rank
+          call errore('pw2posthf',' maxv_rank out of bounds ',1)
+        endif
+        if(maxv_rank == me_image) then
+          if( ku < k_beg .or. ku > k_end) then
+            write(*,*) 'ku out of bounds: ',ku,k_beg,k_end,me_image
+            call errore('pw2posthf',' ku out of bounds ',1)
+          endif
+          call ia_ib_to_iab(iu,iv,iuv,h5id_orbs%norbK(QKtoK2(Q, ku)),noccmax)
+          if( iuv < ab_beg .or. iuv > ab_end) then
+            write(*,*) 'iuv out of bounds: ',iuv,ab_beg,ab_end,me_image
+            call errore('pw2posthf',' iuv out of bounds ',1)
+          endif
+        endif
+      endif
+
+      if(ionode) write(*,*) '  --  Constructing Cholesky Vectors' 
+      Chol(:,:,:,:)=(0.d0,0.d0)
+      more=.true.
+      nchol = 0
+      do while(more) 
+
+        nchol = nchol + 1
+        if( nchol .gt. nchol_max ) & 
+          call errore('pw2posthf.f90','too many cholesky vectors, increase nchol_max',1)
+        if(verbose .and. ionode) write(*,*) 'it: ',nchol,maxv
+
+        CALL start_clock ( 'orb_comm_ovr' )
+        if(maxv_rank == me_image) then
+          ! construct Vuv(r) = conjg(Psi(r,iv,kv)) * Psi(r,iu,ku)
+          ik = ku-k_beg+1
+          call ia_ib_to_iab(iu,iv,iuv,h5id_orbs%norbK(QKtoK2(Q, ku)),noccmax)
+          ibnd = iuv - ab_beg + 1
+          ! add charge augmentation  
+          Vuv(1:dfft%nnr) = (0.d0,0.d0)
+          do j = 1,dfft%nnr
+            Vuv(j) = Vuv(j) * omega + CONJG(Psib(j,iv-b_beg+1,ik,is1)) * &
+                       Psia(j,iu-a_beg+1,ik,is1)
+          enddo  
+          do j = 1,nchol-1
+            Vuv(dfft%nnr+j) = CONJG(Chol(j,ibnd,ik,is1)) 
+          enddo  
+        endif
+        if(nproc_image > 1) call mp_bcast(Vuv(1:dfft%nnr+nchol-1),&
+                                    maxv_rank,intra_image_comm) 
+        CALL stop_clock ( 'orb_comm_ovr' )
+
+        CALL start_clock ( 'orb_2el' )
+        ! contruct new cholesky vector L(n,iab,ik)
+        ! L(ab,n) = (ab|vu) - sum_{1,n-1} L(ab,p) * conjg(L(uv,p))
+        do ik=1,nkloc
+
+          ka = k_beg + ik - 1  
+          kb = QKtoK2(Q, ka)
+          iabmax = noccmax*(h5id_orbs%norbK(ka) + h5id_orbs%norbK(kb)) - noccmax*noccmax
+
+          ! dQ = Qba + Qdc = kb - ka + kd - kc = -Qpts(Q) + ku - kv
+          dQ(1:3) = xksym(1:3, kb) - xksym(1:3, ka) + &
+                  xksym(1:3, ku) - xksym(1:3, QKtoK2(Q,ku))
+          ii=0
+          do jj=1,27
+            if(sum( (dQ(1:3)-dG(1:3,jj))**2 ) .lt. 1.d-8) then
+              ii=jj
+              exit 
+            endif
+          enddo
+          if(ii.lt.1) call errore('pw2posthf','Can not find dQ in G list.',1)
+          Vuv2(1:dfft%nnr) = Vuv(1:dfft%nnr) * phasefac(1:dfft%nnr, ii)
+
+! MAM: IMPROVE HERE AND IN CHOLESKY_R!
+! can turn this into a gemm by processing multiple ik together and
+! spin
+          do ispin=1,n_spin
+            ! possibly wasting effort here!
+            call zgemv('T',dfft%nnr,nabpair,(1.d0,0.d0),Kqab(1,1,ik,ispin),dfft%nnr, &
+                       Vuv2(1),1,(0.d0,0.d0),Chol(nchol,1,ik,ispin),nchol_max) 
+          enddo
+
+        enddo
+        CALL stop_clock ( 'orb_2el' )
+
+        CALL start_clock ( 'orb_cholvgen' )
+        if(nchol > 1) then 
+          do ispin=1,n_spin
+            call zgemv('T',nchol-1,nabpair*nkloc,(-1.d0,0.d0),Chol(1,1,1,ispin),nchol_max, &
+                       Vuv(dfft%nnr+1),1,(1.d0,0.d0),Chol(nchol,1,1,ispin),nchol_max)
+          enddo
+        endif
+
+        ctemp = 1.d0/sqrt(maxv)
+        call zscal(nabpair*nkloc*n_spin,ctemp,Chol(nchol,1,1,1),nchol_max)
+        CALL stop_clock ( 'orb_cholvgen' )
+
+        ! update diagonal: Diag(ibnd,ik) -= L(nchol,ibnd,ik) * conjg(L(nchol,ibnd,ik))
+        CALL start_clock ( 'orb_diagupd' )
+        maxres(nchol) = maxv
+        iu=-1
+        iv=-1
+        ku=-1
+        is1=-1
+        maxv=0.d0
+        do ik=1,nkloc
+
+          ka = k_beg + ik - 1
+          kb = QKtoK2(Q, ka)
+          iabmax = noccmax*(h5id_orbs%norbK(ka) + h5id_orbs%norbK(kb)) - noccmax*noccmax
+
+          do ibnd=1,nabpair
+
+            iab = ab_beg + ibnd - 1
+            if(iab > iabmax) exit
+
+            do ispin=1,n_spin
+
+              Diag(ibnd,ik,ispin) = Diag(ibnd,ik,ispin) - Chol(nchol,ibnd,ik,ispin)*CONJG(Chol(nchol,ibnd,ik,ispin))
+              if( Dble(Diag(ibnd,ik,ispin)) .lt. -thresh*0.01 ) then 
+                call iab_to_ia_ib(iab,ia,ib,h5id_orbs%norbK(kb),noccmax)
+                write(*,*) 'WARNING: Negative diagonal term: ',Q,ik,ibnd,ia,ib,ispin,Diag(ibnd,ik,ispin)
+              endif
+              if( abs(Diag(ibnd,ik,ispin)) .gt. maxv ) then
+                maxv = abs(Diag(ibnd,ik,ispin))
+                call iab_to_ia_ib(iab,iu,iv,h5id_orbs%norbK(kb),noccmax)
+                ku = k_beg + ik - 1  
+                is1=ispin
+              endif
+
+            enddo !ispin
+
+          enddo !ibnd
+
+        enddo ! ik
+        CALL stop_clock ( 'orb_diagupd' )
+
+        CALL start_clock ( 'orb_comm_ovr' )
+        if(nproc_image > 1) then
+          comm( 5*me_image+1 ) = maxv
+          comm( 5*me_image+2 ) = iu
+          comm( 5*me_image+3 ) = iv
+          comm( 5*me_image+4 ) = ku
+          comm( 5*me_image+5 ) = is1
+#if defined (__MPI)
+          call MPI_ALLGATHER( MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, &
+                            comm, 5, MPI_DOUBLE_PRECISION, intra_image_comm, error)
+          if(error .ne. 0) &
+            call errore('pw2posthf','Error: mpi_allgather',error)
+#endif
+          maxv=0.d0
+          maxv_rank=0
+          do i=0,nproc_image-1
+            if( comm( 5*i+1 ) > maxv ) then
+              maxv_rank=i
+              maxv = comm( 5*i+1 )
+            endif
+          enddo
+          iu = comm( 5*maxv_rank+2 )
+          iv = comm( 5*maxv_rank+3 )
+          ku = comm( 5*maxv_rank+4 )
+          is1 = comm( 5*maxv_rank+5 )
+          if( maxv_rank < 0 .or. maxv_rank >= nproc_image ) then
+            write(*,*) 'maxv_rank out of bounds: ',maxv_rank
+            call errore('pw2posthf',' maxv_rank out of bounds ',1)
+          endif
+          if(maxv_rank == me_image) then
+            if( ku < k_beg .or. ku > k_end) then
+              write(*,*) 'ku out of bounds: ',ku,k_beg,k_end,me_image
+              call errore('pw2posthf',' ku out of bounds ',1)
+            endif
+            call ia_ib_to_iab(iu,iv,iuv,h5id_orbs%norbK(QKtoK2(Q, ku)),noccmax)
+            if( iuv < ab_beg .or. iuv > ab_end) then
+              write(*,*) 'iuv out of bounds: ',iuv,ab_beg,ab_end,me_image
+              call errore('pw2posthf',' iuv out of bounds ',1)
+            endif
+          endif
+        endif
+        CALL stop_clock ( 'orb_comm_ovr' )
+
+        if( maxv .gt. maxres(nchol) ) then
+          call errore('pw2posthf','Cholesky residual increase.',1)
+        endif
+
+        if(maxv .lt. thresh) then
+          more=.false.  
+        endif  
+
+      end do
+
+      ncholQ(Q) = nchol
+      CALL start_clock ( 'orb_cholwrt' )
+!      if(root_image == me_image) then
+!        call esh5_posthf_cholesky_root(h5id_hamil%id,Q,k_beg-1,nkloc,ab_beg-1,nabpair,nchol,  &
+!                  nksym,maxnorb*maxnorb,nchol_max,Chol(1,1,1,1),error)
+!      else
+!        call esh5_posthf_cholesky(h5id_hamil%id,Q,k_beg-1,nkloc,ab_beg-1,nabpair,nchol,  &
+!                  nksym,maxnorb*maxnorb,nchol_max,Chol(1,1,1,1),error)
+!      endif
+      CALL stop_clock ( 'orb_cholwrt' )
+      if(error.ne.0) &
+        call errore('pw2posthf','Error in esh5_posthf_cholesky',error)
+      if(ionode) write(*, *) ' Done with Q:',Q,'  nchol:',nchol
+
+      if( Q==1 ) then
+        allocate( v1(nchol_max,2) )
+        v1(:,:) = (0.d0,0.d0)
+      endif
+
+      ! this assumes that noccmax contains all states with non-zero weight
+      do ik=1,nkloc
+
+        ka = k_beg + ik - 1
+        kb = QKtoK2(Q, ka)
+        iabmax = noccmax*h5id_orbs%norbK(kb) 
+
+        do ibnd=1,nabpair
+
+          iab = ab_beg + ibnd - 1
+          if(iab > iabmax) exit
+          call iab_to_ia_ib(iab,ia,ib,h5id_orbs%norbK(kb),noccmax)
+
+          ! EJ  
+          if( Q == 1 .and. ia==ib ) then
+            do ispin=1,n_spin
+              if( abs(weight(ia,ka+nksym*(ispin-1))) > 1d-6 ) then
+                !  
+                v1(1:nchol,1) = v1(1:nchol,1) + weight(ia,ka+nksym*(ispin-1)) *  &
+                                              Chol(1:nchol,ibnd,ik,ispin)
+                !
+              endif  
+            enddo
+          endif  
+
+          if(noncolin) then
+            call errore('cholesky_MO',' noncolin not yet implemented. ',1)
+          endif
+
+          do ispin=1,n_spin
+            if((weight(ia,ka+nksym*(ispin-1)) * weight(ib,kb+nksym*(ispin-1))) > 1d-6 ) then
+              etemp=(0.d0,0.d0)    
+              do j=1,nchol
+                etemp = etemp + Chol(j,ibnd,ik,ispin)*CONJG(Chol(j,ibnd,ik,ispin))
+              enddo    
+              eX = eX - fXX * fac * weight(ia,ka+nksym*(ispin-1)) * &
+                              weight(ib,kb+nksym*(ispin-1)) * etemp 
+            endif
+          enddo
+          !
+        enddo
+        !
+      enddo
+
+      if( Q==1 ) then
+        call mp_sum(v1,intra_image_comm)
+        etemp = (0.d0,0.d0)
+        do j=1,nchol
+          etemp = etemp + v1(j,1) * conjg(v1(j,1))
+        enddo
+        eJ = fXX * fac * fac * etemp
+        etemp = (0.d0,0.d0)
+        do j=1,nchol
+          etemp = etemp + v1(j,2) * conjg(v1(j,2))
+        enddo
+        deallocate( v1 )
+      endif
+
+401   CONTINUE
+
+    enddo
+402 CONTINUE
+    CALL stop_clock ( 'orb_cholesky' )
+    call mp_sum(eX,intra_image_comm)
+    if(ionode) then
+      write(*,*) 'EJ(MF)  (Ha):',0.5d0*eJ/(nksym*1.0)
+      write(*,*) 'EXX(MF) (Ha):',0.5d0*eX/(nksym*1.0)
+    endif
+
+    if(noncolin) then
+      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup+ndown,0,e0*nksym,efc*nksym,nksym,xkcart, &
+                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
+    else
+      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup,ndown,e0*nksym,efc*nksym,nksym,xkcart, &
+                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
+    endif
+
+    if(ionode) then
+      write(*,*) 'Timers: '
+      CALL print_clock ( 'orb_cholesky' )
+      CALL print_clock ( 'orb_comm_ovr' )
+      CALL print_clock ( 'orb_2el' )
+      CALL print_clock ( 'orb_cholvgen' )
+      CALL print_clock ( 'orb_diagupd' )
+      CALL print_clock ( 'orb_cholwrt' )
+    ENDIF
+
+    IF( ALLOCATED(Kqab) ) DEALLOCATE (Kqab)
+    IF( ALLOCATED(Vuv) ) DEALLOCATE (Vuv)
+    IF( ALLOCATED(Vuv2) ) DEALLOCATE (Vuv2)
+    IF( ALLOCATED(Diag) ) DEALLOCATE (Diag)
+    IF( ALLOCATED(vCoulG) ) DEALLOCATE (vCoulG)
+    IF( ALLOCATED(phasefac) ) DEALLOCATE (phasefac)
+    IF( ALLOCATED(maxres) ) DEALLOCATE (maxres)
+    IF( ALLOCATED(xkcart) ) DEALLOCATE (xkcart)
+    IF( ALLOCATED(comm) ) DEALLOCATE (comm)
+    IF( ALLOCATED(ncholQ) ) DEALLOCATE (ncholQ)
+    IF( ALLOCATED(weight) ) DEALLOCATE(weight)
+    IF( ALLOCATED(eigval) ) DEALLOCATE(eigval)
+
+    if(me_image .ne. root_image) &
+      CALL esh5_posthf_close_file(h5id_hamil%id)
+    if(nproc_image > 1) call mp_barrier( intra_image_comm )
+
+    if(ionode) then
+      h5name = TRIM( hamil_file ) 
+      h5len = LEN_TRIM(h5name)
+      call esh5_posthf_join_all(h5id_hamil%id,h5name,h5len,nksym,nproc_image,error)
+      if(error .ne. 0) then
+        write(*,*) 'Error: ',error
+        call errore('pw2posthf','Error in esh5_posthf_join_all',1)
+      endif
+      CALL esh5_posthf_close_file(h5id_hamil%id)
+    endif
+    call close_esh5_read(h5id_orbs)
+    if(nproc_image > 1) call mp_barrier( intra_image_comm )
+
+    CONTAINS
+
+        SUBROUTINE iab_to_ia_ib(iab,ia,ib,norb,noccmax)
+          IMPLICIT NONE
+          INTEGER, INTENT(IN) :: iab,norb,noccmax
+          INTEGER, INTENT(OUT) :: ia,ib
+          !
+          ! if iab <= noccmax*norbK(kb)
+          !   iab = (ia-1)*norbK(kb) + ib 
+          ! else 
+          !   iab = noccmax*norbK(kb) + ( (ia-noccmax-1) )*noccmax + ib
+          !    
+          if(iab <= noccmax*norb) then
+            ia = (iab-1)/norb + 1
+            ib = MOD((iab-1), norb) + 1
+          else
+            ia = (iab-noccmax*norb-1)/noccmax + noccmax + 1
+            ib = MOD((iab-noccmax*norb-1), noccmax) + 1
+          endif
+        END SUBROUTINE iab_to_ia_ib
+
+        SUBROUTINE ia_ib_to_iab(ia,ib,iab,norb,noccmax)
+          IMPLICIT NONE
+          INTEGER, INTENT(IN) :: ia,ib,norb,noccmax
+          INTEGER, INTENT(OUT) :: iab
+          !
+          ! if ia <= noccmax
+          !   iab = (ia-1)*norbK(kb) + ib
+          ! else
+          !   iab = noccmax*norbK(kb) + ( (ia-noccmax-1) )*noccmax + ib
+          !    
+          if(ia <= noccmax) then
+            iab = (ia-1)*norb + ib
+          else
+            iab = noccmax*norb + ( (ia-noccmax-1) )*noccmax + ib    
+          endif
+        END SUBROUTINE ia_ib_to_iab
+
+  END SUBROUTINE cholesky_MO_cpu
 
   ! calculate position dependent range parameter used in basis set correction scheme  
   ! assumes that Psia, DM and Chol have been calculated

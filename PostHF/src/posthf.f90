@@ -27,7 +27,7 @@ PROGRAM posthf
   INTEGER :: iq, ik, regp
   REAL(DP) :: ncholmax, nextracut, thresh, eigcut_occ, eigcut, regkappa
   LOGICAL :: write_psir, expand_kp, debug, verbose 
-  LOGICAL :: low_memory, update_qe_bands,get_hf,get_mp2,use_symm 
+  LOGICAL :: low_memory, update_qe_bands,get_hf,get_mp2,get_rpa,use_symm 
   REAL(DP) :: qnorm_
   ! directory for temporary files
   CHARACTER(len=256) :: outdir, out_prefix, h5_add_orbs, run_type, diag_type
@@ -37,7 +37,7 @@ PROGRAM posthf
 
   NAMELIST / inputpp / prefix, outdir, write_psir, expand_kp, debug, & 
             ndet, ncholmax,thresh, number_of_orbitals,eigcut_occ, eigcut, out_prefix, verbose, & 
-            h5_add_orbs, nskipvir,low_memory, get_hf,get_mp2,use_symm, &
+            h5_add_orbs, nskipvir,low_memory, get_hf,get_mp2,get_rpa,use_symm, &
             regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment
 #ifdef __MPI
   CALL mp_startup ( )
@@ -74,6 +74,7 @@ PROGRAM posthf
   nextracut=-1.0
   get_hf=.true.
   get_mp2=.true.
+  get_rpa=.true.
   regp=0
   regkappa=0.d0
   use_symm=.true.  
@@ -116,6 +117,7 @@ PROGRAM posthf
   CALL mp_bcast(update_qe_bands, ionode_id, world_comm ) 
   CALL mp_bcast(get_hf, ionode_id, world_comm ) 
   CALL mp_bcast(get_mp2, ionode_id, world_comm ) 
+  CALL mp_bcast(get_rpa, ionode_id, world_comm ) 
   CALL mp_bcast(use_symm, ionode_id, world_comm ) 
   CALL mp_bcast(exxdiv_treatment, ionode_id, world_comm ) 
   CALL mp_bcast(regp, ionode_id, world_comm ) 
@@ -151,7 +153,7 @@ PROGRAM posthf
   ! "options" object
   CALL pp_posthf(out_prefix,number_of_orbitals, expand_kp, thresh, &
        eigcut, eigcut_occ, nextracut, ncholmax, ndet, nskipvir, run_type, diag_type, write_psir, update_qe_bands, &
-       h5_add_orbs, read_from_h5, get_hf, get_mp2, use_symm, exxdiv_treatment, regp, regkappa, &
+       h5_add_orbs, read_from_h5, get_hf, get_mp2, get_rpa, use_symm, exxdiv_treatment, regp, regkappa, &
        low_memory, verbose, debug)
   !
 #else
@@ -168,7 +170,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
                           occeigcut, nextracut,  &
                           ncmax, ndet, nskipvir, run_type, diag_type, &
                           write_psir, update_qe_bands, h5_add_orbs, read_from_h5, &
-                          get_hf, get_mp2, use_symm, exxdiv_treatment, regp, regkappa, low_memory, &
+                          get_hf, get_mp2, get_rpa, use_symm, exxdiv_treatment, regp, regkappa, low_memory, &
                           verbose, debug) 
 
   USE kinds, ONLY: DP
@@ -221,6 +223,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   USE twobody_hamiltonian, ONLY: cholesky_r, calculate_KS_bscorr, &
                              chol_verbose => verbose
   USE mp2_module, ONLY: mp2_g,mp2no,approx_mp2no,mp2_verbose => verbose  
+  USE rpa_module, ONLY: rpa_verbose => verbose  
 #if defined(__CUDA)
   USE mp2_module, ONLY: mp2_gpu
 #endif
@@ -232,7 +235,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   REAL(DP), INTENT(IN) :: ncmax, thresh, regkappa
   REAL(DP), INTENT(INOUT) :: occeigcut, eigcut, nextracut
   LOGICAL, INTENT(IN) :: expand_kp, debug, verbose, write_psir, use_symm
-  LOGICAL, INTENT(IN) :: low_memory, update_qe_bands, get_hf, get_mp2
+  LOGICAL, INTENT(IN) :: low_memory, update_qe_bands, get_hf, get_mp2, get_rpa
   CHARACTER(len=256), INTENT(IN) :: h5_add_orbs, run_type, diag_type, exxdiv_treatment
   INTEGER :: ibnd, ik, j
   INTEGER :: ios, ierr, h5len,oldh5,ig_c,save_complex
@@ -243,7 +246,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   INTEGER :: i, nxxs, maxnorb, nelmax
   COMPLEX(DP), ALLOCATABLE :: M(:,:,:,:)  ! Overlap between basis states and
                                             ! occupied KS states. 
-  COMPLEX(DP) :: e1,e1_so,e1_mf,e1_so_mf,emp2
+  COMPLEX(DP) :: e1,e1_so,e1_mf,e1_so_mf,emp2,erpa
   TYPE(h5file_type) :: h5id_input_orbs, h5id_output_orbs, h5id_hamil
 ! **********************************************************************
 
@@ -277,6 +280,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   chol_verbose = verbose
   orb_verbose = verbose
   mp2_verbose = verbose
+  rpa_verbose = verbose
 
   ! initialize variables in posthf_module
   call init_posthf(norb_,symm=use_symm,exxdiv_treat=exxdiv_treatment)
@@ -439,11 +443,13 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
 
     call pyscf_driver_hamil(out_prefix, read_from_h5, h5_add_orbs, &
        ndet, eigcut, nextracut, thresh, ncmax, &
-       get_hf, get_mp2, update_qe_bands, e1, emp2)
+       get_hf, get_mp2, get_rpa, update_qe_bands, e1, emp2, erpa)
     if(get_hf) &
       write(*,*) 'E0, E1, E1_SO (Ha):',e0,e1/(nkfull*1.0),e1_so/(nkfull*1.0)
     if(get_mp2) &
       write(*,*) 'EMP2 (Ha):',emp2
+    if(get_rpa) &
+      write(*,*) 'ERPA (Ha):',erpa
 
   elseif(TRIM(run_type) == 'mp2_fullpw') then
 
@@ -456,6 +462,12 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
     call pyscf_driver_mp2(out_prefix,.true.,TRIM(diag_type),read_from_h5,h5_add_orbs,&
             eigcut,nextracut,regkappa,regp,emp2)
     write(*,*) 'EMP2 (Ha):',emp2
+
+  elseif(TRIM(run_type) == 'rpa_driver') then
+
+    call pyscf_driver_rpa(out_prefix,TRIM(diag_type),read_from_h5,h5_add_orbs,&
+            eigcut,nextracut,thresh,ncmax,erpa)
+    write(*,*) 'EdRPA (Ha):',erpa
 
   else
     call errore('posthf','Error: Unknown run_type',1)

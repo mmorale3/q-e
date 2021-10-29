@@ -1380,6 +1380,65 @@ void F77_FUNC_(esh5_posthf_write_orbmat,ESH5_POSTHF_WRITE_ORBMAT)
   H5Gclose(g);
 }
 
+// write info for orbmat dataset. meant to be used in combination with the XXX_single call below
+void F77_FUNC_(esh5_posthf_write_orbmat_single,ESH5_POSTHF_WRITE_ORBMAT_SINGLE)
+  (hid_t* h_file, const char* gname, const int* glen, const int* na, const int* ni, const int* ik, const int* is, double* OMat, int* error)
+{ 
+  *error=0;
+  char aname[64];
+  hsize_t dims[2];
+  int n2 = (*na)*(*ni);
+  dims[0] = (hsize_t)(n2);
+  dims[1] = 2;
+
+  char gstr[256];
+  memcpy( gstr , gname , *glen ) ;
+  gstr[*glen] = '\0' ;
+  hid_t g = H5Gopen(*h_file,gstr,H5P_DEFAULT);
+  if(g < 0){*error=1;printf("esh5 error making group in write_orbmat_single 0\n");return;}
+
+  int data[4];
+  herr_t ret=H5LTread_dataset(g,"dims",H5T_NATIVE_INT,data);
+  if(ret < 0){*error=1;printf("esh5 error reading dims in write_orbmat_single\n");}
+  if(*na != data[0]) {*error=1;printf("esh5 error in write_orbmat_single: inconsistent size of basis set\n");}
+  if(*ni != data[1]) {*error=1;printf("esh5 error in write_orbmat_single: inconsistent number of MO\n");}
+  if(*ik < 0 || *ik >= data[2]) {*error=1;printf("esh5 error in write_orbmat_single: ik > nkpts\n");}
+  if(*is < 0 || *is >= data[3]) {*error=1;printf("esh5 error in write_orbmat_single: is > nspin\n");}
+
+  int ikpt = *ik;
+  int ispin = *is;
+  sprintf(aname,"s%i_kp%i",ispin,ikpt);
+  ret=H5LTmake_dataset(g,aname,2,dims,H5T_NATIVE_DOUBLE,OMat);
+  if(ret < 0){*error=1;printf("esh5 error writing orbmat single 2\n");return;}
+
+  H5Gclose(g);
+}
+
+// same as above, but write a single spin/kpoint slice of the full tensor
+void F77_FUNC_(esh5_posthf_write_orbmat_info,ESH5_POSTHF_WRITE_ORBMAT_INFO)
+  (hid_t* h_file, const char* gname, const int* glen, const int* na, const int* ni, const int* nk, const int* ns, int* error)
+{ 
+  *error=0;
+  char aname[64];
+  hsize_t dims[2];
+  int n2 = (*na)*(*ni);
+  dims[0] = (hsize_t)(n2);
+  dims[1] = 2;
+  
+  char gstr[256];
+  memcpy( gstr , gname , *glen ) ;
+  gstr[*glen] = '\0' ;
+  hid_t g = H5Gopen(*h_file,gstr,H5P_DEFAULT);
+  if(g < 0) g = H5Gcreate(*h_file,gstr,H5P_DEFAULT,H5P_DEFAULT,H5P_DEFAULT);
+  if(g < 0){*error=1;printf("esh5 error making group in write_orbmat 0\n");return;}
+  
+  const hsize_t dim4=4;
+  int data[4]; data[0]=*na; data[1]=*ni; data[2]=*nk; data[3]=*ns;
+  herr_t ret=H5LTmake_dataset(g,"dims",1,&dim4,H5T_NATIVE_INT,data);
+  if(ret < 0){*error=1;printf("esh5 error writing orbmat 1\n");return;}
+  H5Gclose(g);
+}
+
 void F77_FUNC_(esh5_posthf_read_orbmat_info,ESH5_POSTHF_READ_ORBMAT_INFO)
   (hid_t* h_file, const char* gname, const int* glen, int* na, int* ni, int* nk, int* ns, int* error)
 {
