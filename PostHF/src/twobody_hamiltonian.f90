@@ -1644,6 +1644,7 @@ MODULE twobody_hamiltonian
 
     if(ionode) then
       if(nproc_image > 1) call join_h5(comm)
+      call write_hamil_meta()
       call qeh5_close(qeh5_hamil)
     endif
     call close_esh5_read(h5id_orbs)
@@ -1785,7 +1786,6 @@ MODULE twobody_hamiltonian
                 ip_dset%name = "L"//trim(adjustl(Qstr))//"_k"//  &
                                     trim(adjustl(kstr))//"_s"//trim(adjustl(sstr))
                 call qeh5_set_space(ip_dset, Chol(1,1,1,1), 2, [nchol_max,nabpair], 'm')
-                !call qeh5_set_space(ip_dset, Chol(1,1,1,1), 2, [nchol,int(bounds(4*ip+4))], 'f')
                 call qeh5_open_dataset(ip_moL, ip_dset, ACTION = 'read')
                 call qeh5_set_memory_hyperslab(ip_dset, OFFSET = [0,0], &
                                    COUNT = [2*nchol,int(bounds(4*ip+4))])
@@ -1829,6 +1829,73 @@ MODULE twobody_hamiltonian
           !
         END SUBROUTINE join_h5 
         
+        SUBROUTINE write_hamil_meta()
+          USE hdf5
+          USE h5lt
+          !
+          IMPLICIT NONE
+          integer(HSIZE_T) :: dims(2)
+          integer(HID_T) :: int_type_id, dp_type_id 
+          TYPE(qeh5_file) :: ham,moL
+          INTEGER :: err, nmotot, d(1)
+
+          dp_type_id = h5kind_to_type( DP, H5_REAL_KIND)
+          ! H5T_NATIVE_INTEGER
+
+          call qeh5_open_group(qeh5_hamil, "Hamiltonian", ham)
+          call qeh5_open_group(ham, "MOCholesky", moL)
+
+          dims = [1, 0]
+          d(1) = noccmax
+          call h5ltmake_dataset_f(moL%id, "noccmax", 1, dims, &
+                              H5T_NATIVE_INTEGER, d, err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [1, 0]
+          d(1) = nabtot
+          call h5ltmake_dataset_f(moL%id, "nabtot", 1, dims, &
+                              H5T_NATIVE_INTEGER, d, err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [nksym, 3]
+          call h5ltmake_dataset_f(moL%id, "KPoints", 2, dims, dp_type_id, &
+                              xkcart, err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [nksym,0]
+          call h5ltmake_dataset_f(moL%id, "MinusK", 1, dims,  &
+                              H5T_NATIVE_INTEGER, kminus, err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [nksym, nksym]
+          call h5ltmake_dataset_f(moL%id, "QKTok2", 2, dims, &
+                              H5T_NATIVE_INTEGER, QKtoK2, err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [nksym,0]
+          call h5ltmake_dataset_f(moL%id, "NMOPerKP", 1, dims,  &
+                              H5T_NATIVE_INTEGER, h5id_orbs%norbK, err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [nksym,0]
+          call h5ltmake_dataset_f(moL%id, "NCholPerKP", 1, dims,  &
+                              H5T_NATIVE_INTEGER, ncholQ, err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [nksym,0]
+          call h5ltmake_dataset_f(moL%id, "Energies", 1, dims,  &
+                              dp_type_id, [0.d0,0.d0], err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          dims = [8,0]
+          call h5ltmake_dataset_f(moL%id, "dims", 1, dims,  &
+              H5T_NATIVE_INTEGER, [0,0,nksym,nmotot,nup,ndown,0,0], err)
+          call errore('write_hamil_meta','H5LTmake_dataset_f',abs(err))
+
+          call qeh5_close(moL)
+          call qeh5_close(ham)
+        
+        END SUBROUTINE write_hamil_meta
 
   END SUBROUTINE cholesky_MO_cpu
 

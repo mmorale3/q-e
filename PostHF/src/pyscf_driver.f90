@@ -493,6 +493,7 @@ subroutine pyscf_driver_rpa(out_prefix_,diag_type,nread_from_h5, &
   use fft_base,             ONLY : dffts
   USE read_orbitals_from_file, ONLY: open_esh5_read,close_esh5_read,h5file_type 
   USE posthf_mod, ONLY: norb,nksym,nmax_DM,DM,DM_mf,e0, efc, numspin
+  USE rpa_module, ONLY: rpa_cholesky
   !
   IMPLICIT NONE
   !
@@ -611,7 +612,7 @@ subroutine pyscf_driver_rpa(out_prefix_,diag_type,nread_from_h5, &
   !
   write(*,*) ' Starting RPA' 
   FLUSH( stdout )
-!  call rpa_cholesky_MO(energy,nelmax,dffts,hamilFile,orbsFile)
+  call rpa_cholesky(energy,dffts,"mo",hamilFile,orbsFile)
   erpa = real(dble(energy),kind=8)
   !
   call print_clock('')    
@@ -778,7 +779,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
 
   if(get_rpa) then
     call mp_barrier(intra_image_comm)
-    call rpa_cholesky(e2_rpa,dffts,hamilFile,canOrbsFile)
+    call rpa_cholesky(e2_rpa,dffts,"full",hamilFile,canOrbsFile)
     erpa = real(dble(e2_rpa),kind=8)
   endif
   call mp_barrier(intra_image_comm)

@@ -49,30 +49,31 @@ MODULE rpa_module
   ! hamil_esh5 and rotation matrix to canonical orbitals/dft orbitals in
   ! orbs_esh5. Will read CanOrbMat from orbs_esh5
   !
-  SUBROUTINE rpa_cholesky(edrpa,dfft,hamil_esh5,orbmat_esh5,esosex) 
+  SUBROUTINE rpa_cholesky(edrpa,dfft,chol_type,hamil_esh5,orbmat_esh5,esosex) 
     !
     USE control_flags,        ONLY : use_gpu
     !
     IMPLICIT NONE
     !
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
-    CHARACTER(len=*), INTENT(IN) :: hamil_esh5, orbmat_esh5
+    CHARACTER(len=*), INTENT(IN) :: hamil_esh5, orbmat_esh5, chol_type
     COMPLEX(DP), INTENT(OUT) :: edrpa
     COMPLEX(DP), INTENT(IN), OPTIONAL :: esosex
     !
 #if defined(__CUDA)
 !      if(use_gpu) then
-!        call rpa_cholesky_gpu(edrpa,dfft,hamil_esh5,orbmat_esh5,esosex)
+!        call rpa_cholesky_gpu(edrpa,dfft,chol_type,hamil_esh5,orbmat_esh5,esosex)
 !      else
-        call rpa_cholesky_cpu(edrpa,dfft,hamil_esh5,orbmat_esh5,esosex)
+        call rpa_cholesky_cpu(edrpa,dfft,chol_type,hamil_esh5,orbmat_esh5,esosex)
 !      endif
 #else
-      call rpa_cholesky_cpu(edrpa,dfft,hamil_esh5,orbmat_esh5,esosex)
+      call rpa_cholesky_cpu(edrpa,dfft,chol_type,hamil_esh5,orbmat_esh5,esosex)
 #endif
   END SUBROUTINE rpa_cholesky
   
-  SUBROUTINE rpa_cholesky_cpu(edrpa,dfft,hamil_esh5,orbmat_esh5,esosex) 
+  SUBROUTINE rpa_cholesky_cpu(edrpa,dfft,chol_type,hamil_esh5,orbmat_esh5,esosex) 
     !
+    USE qeh5_base_module
     USE constants, ONLY: tpi
     USE parallel_include
     USE wvfct, ONLY: wg, et
@@ -83,7 +84,7 @@ MODULE rpa_module
     IMPLICIT NONE
     !
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
-    CHARACTER(len=*), INTENT(IN) :: hamil_esh5, orbmat_esh5
+    CHARACTER(len=*), INTENT(IN) :: hamil_esh5, orbmat_esh5, chol_type
     COMPLEX(DP), INTENT(OUT) :: edrpa
     COMPLEX(DP), INTENT(IN), OPTIONAL :: esosex
     !
@@ -94,10 +95,10 @@ MODULE rpa_module
     INTEGER :: ispin, ik, ikk, iw, iwn, iwQ 
     INTEGER :: nP, maxnP, nPi, kk0
     INTEGER :: k_beg, k_end, nkloc, nia_max, ierror
-    INTEGER :: nfreq, maxnorb, nchol_max
+    INTEGER :: nfreq, maxnorb, nchol_max, nabtot, noccmax
     REAL(DP) :: sx   ! spin degeneracy factor
     Complex(DP) :: ione
-    Complex(DP) :: edmp2,eJ,eX 
+    Complex(DP) :: edmp2
     !
     INTEGER :: nel(2), maxocc, maxvir
     INTEGER, ALLOCATABLE :: noccK(:,:), nvirK(:,:)
@@ -116,9 +117,13 @@ MODULE rpa_module
     COMPLEX(DP), ALLOCATABLE :: Ria(:,:) ! right hand side of MO Cholesky matrix 
     COMPLEX(DP), ALLOCATABLE :: Bia(:)   ! eigenvalue factors 
     REAL(DP), ALLOCATABLE :: xfreq(:), wfreq(:)
+    TYPE(qeh5_file) :: qeh5_hamil 
 
     write(*,*)
     write(*,*) 'Starting RPA calculation. '
+
+    if(chol_type.ne.'full' .and. chol_type.ne.'mo') &
+      call errore('rpa_cholesky_cpu','Unknown chol_type',1)
 
     ione = (0.d0,1.d0)
     sx = 1.d0
@@ -126,17 +131,22 @@ MODULE rpa_module
 
     get_sosex = present(esosex)
     get_sosex = .false.  ! turn off for now
-    CALL esh5_posthf_open_file_read(h5id_hamil%id,TRIM(hamil_esh5),  &
-                                                  LEN_TRIM(hamil_esh5),ierror)
-    if(ierror .ne. 0 ) &
-      call errore('rpa','error opening hamil file',1)
-
     allocate( ncholQ(nksym), norbK(nksym) )
-    call esh5_posthf_read_nchol(h5id_hamil%id,ncholQ, ierror)
-    if(ierror .ne. 0) call errore('rpa','Error: esh5_posthf_read_nchol',ierror)
+    if(chol_type == 'full') then
+      CALL esh5_posthf_open_file_read(h5id_hamil%id,TRIM(hamil_esh5),  &
+                                                  LEN_TRIM(hamil_esh5),ierror)
+      if(ierror .ne. 0 ) &
+        call errore('rpa','error opening hamil file',1)
+      call esh5_posthf_read_nchol(h5id_hamil%id,ncholQ, ierror)
+      if(ierror .ne. 0) call errore('rpa','Error: esh5_posthf_read_nchol',ierror)
+      call esh5_posthf_read_norbk(h5id_hamil%id,norbK, ierror)
+      if(ierror .ne. 0) call errore('rpa','Error: esh5_posthf_read_norbk',ierror)
+    elseif(chol_type == 'mo') then
+      call qeh5_openfile(qeh5_hamil,hamil_esh5,'read')
+      call read_meta()
+! read ncholQ, norbK, noccmax, nabtot        
+    endif
     nchol_max = maxval(ncholQ(:))
-    call esh5_posthf_read_norbk(h5id_hamil%id,norbK, ierror)
-    if(ierror .ne. 0) call errore('rpa','Error: esh5_posthf_read_norbk',ierror)
     maxnorb = maxval(norbK(:))
 
     CALL esh5_posthf_open_file_read(h5id_orbmat%id,TRIM(orbmat_esh5),  &
@@ -205,21 +215,25 @@ MODULE rpa_module
 
     ! reading all cholesky vectors for now, until you have a routine that reads
     ! a section
-    allocate( MOs(maxnorb,maxnorb,2), Qpq(nchol_max,nchol_max) )
+    allocate( Qpq(nchol_max,nchol_max), Tpq(nP,nchol_max,nfreq) )
     allocate( T2(nchol_max,nchol_max) )
-    allocate( Lia(nia_max,maxnP), Ria(nia_max,maxnP), Tpq(nP,nchol_max,nfreq) )
-    allocate( T1(maxocc*maxnorb*nP), Bia(nia_max), eQ(nksym,10) )
+    allocate( Bia(nia_max), eQ(nksym,10) )
     eQ(:,:) = (0.d0,0.d0)
+    if(chol_type == 'full') then
+      allocate( MOs(maxnorb,maxnorb,2), T1(maxocc*maxnorb*nP))
+      allocate( Lia(nia_max,maxnP), Ria(nia_max,maxnP) ) 
+    elseif(chol_type == 'mo') then
+      allocate( Lia(maxnP,nia_max), Ria(maxnP,nia_max) ) 
+    endif
 
 ! MAM: put timers everywhere and improve performance where possible
 
     ! 3. Loop over Q and frequency 
-    eJ = (0.d0,0.d0)
-    eX = (0.d0,0.d0)
     do iq=1,nQuniq
 
       Q = xQ(iq)
-      allocate( Chol(ncholQ(Q),maxnorb*maxnorb) )
+      if(chol_type == 'full') & 
+        allocate( Chol(ncholQ(Q),maxnorb*maxnorb) )
 
       Tpq(:,:,:) = (0.d0,0.d0)
       do ik=1,nkloc
@@ -227,57 +241,60 @@ MODULE rpa_module
         ki = k_beg+ik-1
         ka = QKtoK2(Q,ki)  ! ka = ki-Q+G
 
-        !   3.a Read Cholesky matrix 
-        call esh5_posthf_read_cholesky(h5id_hamil%id,Q-1,ki-1,ncholQ(Q),&
-              maxnorb*maxnorb,Chol(1,1),ierror)
-        if(ierror .ne. 0 ) &
-          call errore('rpa','error reading Chol',1)
-        ! should I call blas?
+        if(chol_type == 'full') then
+          !   3.a Read Cholesky matrix 
+          call esh5_posthf_read_cholesky(h5id_hamil%id,Q-1,ki-1,ncholQ(Q),&
+                maxnorb*maxnorb,Chol(1,1),ierror)
+          if(ierror .ne. 0 ) &
+            call errore('rpa','error reading Chol',1)
+          ! should I call blas?
 
-        allocate( CholT(norbK(ki)*norbK(ka),nP) )
-        ! improve this later, Chol as written has c-style layout
-        ! for now just transpose
-        do n=1,nP
-!          CholT(1:norbK(ki)*norbK(ka),1:nP) = &
-!                        TRANSPOSE(Chol(Pbounds(me_pool+1):Pbounds(me_pool+2)-1,1:norbK(ki)*norbK(ka)))
-          do ii=1,norbK(ki)
-          do jj=1,norbK(ka)
-            CholT((jj-1)*norbK(ki)+ii,n) = Chol(Pbounds(me_pool+1)+n-1,(ii-1)*norbK(ka)+jj)
+          allocate( CholT(norbK(ki)*norbK(ka),nP) )
+          ! improve this
+          do n=1,nP
+            do ii=1,norbK(ki)
+            do jj=1,norbK(ka)
+              CholT((jj-1)*norbK(ki)+ii,n) = &
+                  Chol(Pbounds(me_pool+1)+n-1,(ii-1)*norbK(ka)+jj)
+            enddo
+            enddo
           enddo
-          enddo
-        enddo
+        endif
 
         do ispin=1,nspin
 
           kk0 = (ispin-1)*nksym
 
-          !  3.b read MO matrix
-          call esh5_posthf_read_orbmat(h5id_orbmat%id,"CanOrbMat",9,  &
+          if(chol_type == 'full') then
+            !  3.b read MO matrix
+            call esh5_posthf_read_orbmat(h5id_orbmat%id,"CanOrbMat",9,  &
                         ki-1,ispin-1,MOs(1,1,1),ierror)
-          if(ierror .ne. 0 ) &
-            call errore('rpa','error reading MOs',1)
-          call esh5_posthf_read_orbmat(h5id_orbmat%id,"CanOrbMat",9,  &
+            if(ierror .ne. 0 ) &
+              call errore('rpa','error reading MOs',1)
+            call esh5_posthf_read_orbmat(h5id_orbmat%id,"CanOrbMat",9,  &
                         ka-1,ispin-1,MOs(1,1,2),ierror)
-          if(ierror .ne. 0 ) &
-            call errore('rpa','error reading MOs',1)
+            if(ierror .ne. 0 ) &
+              call errore('rpa','error reading MOs',1)
 
-          ! process the occ-vir sector!
-          ! Lia,P = sum_uv conj(M(u,i)) CholT(u,v,P) M(v,a)  
-          Lia(:,:) = (0.d0,0.d0)
-          ! T1(i,v,P) = sum_u conj(M(u,i)) CholT(u,v,P)
-          call zgemm('C','N',noccK(ki,ispin),norbK(ka)*nP,norbK(ki), &
-                     (1.d0,0.d0),MOs(1,1,1),size(MOs,1),  &
+            ! process the occ-vir sector!
+            ! Lia,P = sum_uv conj(M(u,i)) CholT(u,v,P) M(v,a)  
+            Lia(:,:) = (0.d0,0.d0)
+            ! T1(i,v,P) = sum_u conj(M(u,i)) CholT(u,v,P)
+            call zgemm('C','N',noccK(ki,ispin),norbK(ka)*nP,norbK(ki), &
+                       (1.d0,0.d0),MOs(1,1,1),size(MOs,1),  &
                                  CholT(1,1),norbK(ki), &
-                     (0.d0,0.d0),T1(1),noccK(ki,ispin)) 
-          do n=1,nP
-            ! Lia(i,a,P) = sum_v T1(i,v,P) * M(v,a)
-            call zgemm('N','N',noccK(ki,ispin),nvirK(ka,ispin),norbK(ka), &
-                     (1.d0,0.d0),T1((n-1)*noccK(ki,ispin)*norbK(ka)+1),noccK(ki,ispin), &
-                     MOs(1,noccK(ka,ispin)+1,2),size(MOs,1), &
-                     (0.d0,0.d0),Lia(1,n),noccK(ki,ispin)) 
-          enddo
-
-! check Ehf and Emp2 by direct calculation in 2x1x1 case
+                       (0.d0,0.d0),T1(1),noccK(ki,ispin)) 
+            do n=1,nP
+              ! Lia(i,a,P) = sum_v T1(i,v,P) * M(v,a)
+              call zgemm('N','N',noccK(ki,ispin),nvirK(ka,ispin),norbK(ka), &
+                       (1.d0,0.d0),T1((n-1)*noccK(ki,ispin)*norbK(ka)+1),noccK(ki,ispin), &
+                       MOs(1,noccK(ka,ispin)+1,2),size(MOs,1), &
+                       (0.d0,0.d0),Lia(1,n),noccK(ki,ispin)) 
+            enddo
+          elseif(chol_type == 'mo') then
+            ! read Lp,ia and conjugate
+            call read_Lia_conjugated(Q,ki,ka,ispin,Pbounds(me_pool+1),nP)
+          endif
 
           do ip=1,nproc_pool
 
@@ -303,47 +320,78 @@ MODULE rpa_module
                 enddo
               enddo
 
-              !  scale by eigenvalue factor 
-              do i=1,nPi
-                do ia=1,n
-                  Ria(ia,i) = Ria(ia,i) * Bia(ia)
+              if(chol_type=='full') then
+                !  scale by eigenvalue factor 
+                do i=1,nPi
+                  do ia=1,n
+                    Ria(ia,i) = Ria(ia,i) * Bia(ia)
+                  enddo
                 enddo
-              enddo
-
-              ! accumulate Tpq = sum conj(Liap) * Riap
-              call zgemm('C','N',nP,nPi,n, &
+                ! accumulate Tpq = sum conj(Liap) * Riap
+                call zgemm('C','N',nP,nPi,n, &
                          (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
                          (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
-
-              !  remove eigenvalue factor 
-              do i=1,nPi
-                do ia=1,n
-                  Ria(ia,i) = Ria(ia,i) / Bia(ia)
+                !  remove eigenvalue factor 
+                do i=1,nPi
+                  do ia=1,n
+                    Ria(ia,i) = Ria(ia,i) / Bia(ia)
+                  enddo
                 enddo
-              enddo
+              elseif(chol_type == 'mo') then
+                !  scale by eigenvalue factor 
+                do ia=1,n
+                  do i=1,nPi
+                    !Ria(i,ia) = Ria(i,ia) * conjg(Bia(ia))
+                    Ria(i,ia) = Ria(i,ia) * Bia(ia)
+                  enddo
+                enddo
+                ! accumulate Tpq = sum conj(Liap) * Riap
+!                call zgemm('N','C',nP,nPi,n, &
+!                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
+!                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
+do ii=1,nP
+do jj=1,nPi
+do i=1,n
+  Tpq(ii,Pbounds(ip)+jj-1,iw) = Tpq(ii,Pbounds(ip)+jj-1,iw) + sx* &
+        conjg(Lia(ii,i)) * Ria(jj,i)
+enddo
+enddo
+enddo
+                !  remove eigenvalue factor 
+                do ia=1,n
+                  do i=1,nPi
+                    !Ria(i,ia) = Ria(i,ia) / conjg(Bia(ia))
+                    Ria(i,ia) = Ria(i,ia) / Bia(ia)
+                  enddo
+                enddo
+              endif
 
             enddo ! iw
             !
           enddo ! ip - loop over procs in npool
 
           ! now repeat the process for the vir-occ sector!
-          ! Lia,P = sum_uv conj(M(u,a)) CholT(u,v,P) M(v,i)  
-          Lia(:,:) = (0.d0,0.d0)
-          ! T1(u,i,P) = sum_v CholT(u,v,P) M(v,i) 
-          do n=1,nP  
-            call zgemm('N','N',norbK(ki),noccK(ka,ispin),norbK(ka), &
+          if(chol_type=='full') then
+            ! Lia,P = sum_uv conj(M(u,a)) CholT(u,v,P) M(v,i)  
+            Lia(:,:) = (0.d0,0.d0)
+            ! T1(u,i,P) = sum_v CholT(u,v,P) M(v,i) 
+            do n=1,nP  
+              call zgemm('N','N',norbK(ki),noccK(ka,ispin),norbK(ka), &
                      (1.d0,0.d0),CholT(1,n),norbK(ki), &
                      MOs(1,1,2),size(MOs,1), &
                      (0.d0,0.d0),T1((n-1)*norbK(ki)*noccK(ka,ispin)+1),norbK(ki))
-          enddo
-          ! Lia(a,i,P) = sum_u conj(M(u,a)) T1(u,i,P)
-! pack T1 differently to allow a single gemm call
-          do n=1,nP  
-            call zgemm('C','N',nvirK(ki,ispin),noccK(ka,ispin),norbK(ki), &
+            enddo
+            ! Lia(a,i,P) = sum_u conj(M(u,a)) T1(u,i,P)
+            do n=1,nP  
+              call zgemm('C','N',nvirK(ki,ispin),noccK(ka,ispin),norbK(ki), &
                      (1.d0,0.d0),MOs(1,noccK(ki,ispin)+1,1),size(MOs,1), &
                      T1((n-1)*norbK(ki)*noccK(ka,ispin)+1),norbK(ki), &
                      (0.d0,0.d0),Lia(1,n),nvirK(ki,ispin)) 
-          enddo
+            enddo
+          elseif(chol_type == 'mo') then
+            ! read Lp,ai and conjugate
+            call read_Lai_conjugated(Q,ki,ka,ispin,Pbounds(me_pool+1),nP)
+          endif
 
           do ip=1,nproc_pool
 
@@ -369,24 +417,51 @@ MODULE rpa_module
                 enddo
               enddo
 
-              !  scale by eigenvalue factor 
-              do i=1,nPi
-                do ia=1,n
-                  Ria(ia,i) = Ria(ia,i) * Bia(ia)
+              if(chol_type=='full') then
+                !  scale by eigenvalue factor 
+                do i=1,nPi
+                  do ia=1,n
+                    Ria(ia,i) = Ria(ia,i) * Bia(ia)
+                  enddo
                 enddo
-              enddo
-
-              ! accumulate Tpq = sum conj(Liap) * Riap
-              call zgemm('C','N',nP,nPi,n, &
+                ! accumulate Tpq = sum conj(Liap) * Riap
+                call zgemm('C','N',nP,nPi,n, &
                          (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
                          (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
-
-              !  remove eigenvalue factor 
-              do i=1,nPi
-                do ia=1,n
-                  Ria(ia,i) = Ria(ia,i) / Bia(ia)
+                !  remove eigenvalue factor 
+                do i=1,nPi
+                  do ia=1,n
+                    Ria(ia,i) = Ria(ia,i) / Bia(ia)
+                  enddo
                 enddo
-              enddo
+              elseif(chol_type == 'mo') then
+                !  scale by eigenvalue factor 
+                do ia=1,n
+                  do i=1,nPi
+                    !Ria(i,ia) = Ria(i,ia) * conjg(Bia(ia))
+                    Ria(i,ia) = Ria(i,ia) * Bia(ia)
+                  enddo
+                enddo
+                ! accumulate Tpq = sum Lpia * Rqia.T.conj()
+!                call zgemm('N','C',nP,nPi,n, &
+!                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
+!                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
+do ii=1,nP
+do jj=1,nPi
+do i=1,n
+  Tpq(ii,Pbounds(ip)+jj-1,iw) = Tpq(ii,Pbounds(ip)+jj-1,iw) + sx* &
+        conjg(Lia(ii,i)) * Ria(jj,i)
+enddo
+enddo
+enddo
+                !  remove eigenvalue factor 
+                do ia=1,n
+                  do i=1,nPi
+                    !Ria(i,ia) = Ria(i,ia) / conjg(Bia(ia))
+                    Ria(i,ia) = Ria(i,ia) / Bia(ia)
+                  enddo
+                enddo
+              endif
 
             enddo ! iw
             !
@@ -394,11 +469,11 @@ MODULE rpa_module
 
         enddo ! ispin
         !
-        deallocate( CholT )
+        if(allocated(CholT)) deallocate( CholT )
         !
       enddo ! ik
 
-      deallocate( Chol )
+      if(allocated(Chol)) deallocate( Chol )
 
       ! accumulate Qpq and calculate energy contributions
       ! round-robin distribution over cores
@@ -447,6 +522,11 @@ MODULE rpa_module
     ENDIF
     write(*,*) ' ************************************** '
 
+    if(chol_type=='full') then
+      call esh5_posthf_close_file(h5id_hamil%id) 
+    elseif(chol_type=='mo') then
+      call qeh5_close(qeh5_hamil)
+    endif
     !
     ! deallocate
     if(allocated(noccK)) deallocate(noccK)
@@ -471,6 +551,141 @@ MODULE rpa_module
     if(allocated(wfreq)) deallocate(wfreq)
     if(allocated(Pbounds)) deallocate(Pbounds)
     !if(allocated()) deallocate()
+ 
+    CONTAINS
+
+    SUBROUTINE read_Lia_conjugated(Q,ki,ka,ispin,P_beg,nP)
+      !
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: Q,ki,ka,ispin,P_beg,nP  
+      INTEGER :: iaC,ia,a,i,n, nPi
+      CHARACTER(LEN=4) :: Qstr,kstr,sstr
+      TYPE(qeh5_file) :: ham,moL
+      TYPE(qeh5_dataset) :: dset
+      COMPLEX(DP), ALLOCATABLE :: buff(:,:)  
+      COMPLEX(DP) :: eJ,eX
+
+      nPi = min( ncholQ(Q)-P_beg+1, nP )  
+      if(noccK(ki,ispin) > noccmax) &
+        call errore('read_Lia','noccK(ki,ispin) > noccmax',1)  
+      allocate(buff(nPi,noccK(ki,ispin)*norbK(ka)))  
+      call qeh5_open_group(qeh5_hamil, "Hamiltonian", ham)
+      call qeh5_open_group(ham, "MOCholesky", moL)
+      write ( Qstr, '(I4)') Q-1
+      write ( kstr, '(I4)') ki-1
+      write ( sstr, '(I4)') ispin-1
+      dset%name = "L"//trim(adjustl(Qstr))//"_k"//  &
+                          trim(adjustl(kstr))//"_s"//trim(adjustl(sstr))
+      call qeh5_set_space(dset, buff(1,1), 2, [nPi,size(buff,2)], 'm')
+      call qeh5_open_dataset(moL, dset, ACTION = 'read')
+      call qeh5_set_file_hyperslab(dset, OFFSET = [2*P_beg-2,0], &
+                         COUNT = [2*nPi,size(buff,2)])
+      call qeh5_read_dataset(buff, dset)
+
+      ia=0
+      ! careful here, ia is c-ordered in buff and fortran ordered in Lia  
+      Lia(:,:)=(0.d0,0.d0)  
+      do a=noccK(ka,ispin)+1,noccK(ka,ispin)+nvirK(ka,ispin)
+      do i=1,noccK(ki,ispin)
+        ia=ia+1
+        iaC = (i-1)*norbK(ka) + a
+        do n=1,nPi
+          !Lia(n,ia) = conjg(buff(n,iaC))  
+          Lia(n,ia) = buff(n,iaC) 
+        enddo   
+      enddo   
+      enddo   
+      call qeh5_close(dset)
+      call qeh5_close(moL)
+      call qeh5_close(ham)
+      deallocate(buff)
+      !
+    END SUBROUTINE read_Lia_conjugated
+
+    SUBROUTINE read_Lai_conjugated(Q,ki,ka,ispin,P_beg,nP)
+      !
+      IMPLICIT NONE
+      INTEGER, INTENT(IN) :: Q,ki,ka,ispin,P_beg,nP
+      INTEGER :: aiC,ai,a,i,n,nPi
+      CHARACTER(LEN=4) :: Qstr,kstr,sstr
+      TYPE(qeh5_file) :: ham,moL
+      TYPE(qeh5_dataset) :: dset
+      COMPLEX(DP), ALLOCATABLE :: buff(:,:)
+
+      nPi = min( ncholQ(Q)-P_beg+1, nP )  
+      if(noccK(ka,ispin) > noccmax) &
+        call errore('read_Lai','noccK(ka,ispin) > noccmax',1)
+      allocate(buff(nPi,nvirK(ki,ispin)*noccmax))
+      call qeh5_open_group(qeh5_hamil, "Hamiltonian", ham)
+      call qeh5_open_group(ham, "MOCholesky", moL)
+      write ( Qstr, '(I4)') Q-1
+      write ( kstr, '(I4)') ki-1
+      write ( sstr, '(I4)') ispin-1
+      dset%name = "L"//trim(adjustl(Qstr))//"_k"//  &
+                          trim(adjustl(kstr))//"_s"//trim(adjustl(sstr))
+      call qeh5_set_space(dset, buff(1,1), 2, [nPi,size(buff,2)], 'm')
+      call qeh5_open_dataset(moL, dset, ACTION = 'read')
+      call qeh5_set_file_hyperslab(dset, &
+                         OFFSET = [2*P_beg-2,norbK(ka)*noccmax], &
+                         COUNT = [2*nPi,size(buff,2)])
+      call qeh5_read_dataset(buff, dset)
+      Lia(:,:)=(0.d0,0.d0)  
+      ai=0
+      do i=1,noccK(ka,ispin)
+      do a=1,nvirK(ki,ispin)
+        ai=ai+1
+        aiC = (a-1)*noccmax + i
+        do n=1,nPi
+          !Lia(n,ai) = conjg(buff(n,aiC))
+          Lia(n,ai) = buff(n,aiC)
+        enddo
+      enddo
+      enddo
+      call qeh5_close(dset)
+      call qeh5_close(moL)
+      call qeh5_close(ham)
+      deallocate(buff)
+      !  
+    END SUBROUTINE read_Lai_conjugated
+
+    SUBROUTINE read_meta()
+      USE h5lt
+      !
+      IMPLICIT NONE
+      integer(HSIZE_T) :: dims(1)
+      integer(HID_T) :: int_type_id, dp_type_id
+      TYPE(qeh5_file) :: ham,moL
+      INTEGER :: err, nmotot, d(1)
+
+      call qeh5_open_group(qeh5_hamil, "Hamiltonian", ham)
+      call qeh5_open_group(ham, "MOCholesky", moL)
+
+      dims = [1]
+      call h5ltread_dataset_f(moL%id, "noccmax", H5T_NATIVE_INTEGER, d, dims, err)
+      call errore('read_meta','H5LTmake_dataset_f',abs(err))
+      noccmax = d(1) 
+
+      dims = [1]
+      call h5ltread_dataset_f(moL%id, "nabtot", H5T_NATIVE_INTEGER, d, dims, err)
+      call errore('read_meta','H5LTmake_dataset_f',abs(err))
+      nabtot = d(1) 
+
+      dims = [nksym]
+      call h5ltread_dataset_f(moL%id, "NMOPerKP", H5T_NATIVE_INTEGER, norbK, & 
+                        dims, err)
+      call errore('read_meta','H5LTmake_dataset_f',abs(err))
+
+      dims = [nksym]
+      call h5ltread_dataset_f(moL%id, "NCholPerKP", H5T_NATIVE_INTEGER, ncholQ, &
+                        dims, err)
+      call errore('read_meta','H5LTmake_dataset_f',abs(err))
+
+      call qeh5_close(moL)
+      call qeh5_close(ham)
+
+! read ncholQ, norbK, noccmax, nabtot 
+    END SUBROUTINE read_meta
+
     !
   END SUBROUTINE rpa_cholesky_cpu
   
