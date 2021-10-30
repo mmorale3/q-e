@@ -1015,6 +1015,7 @@ MODULE twobody_hamiltonian
   !
   SUBROUTINE cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file)
     USE parallel_include
+    USE qeh5_base_module
     USE ions_base,          ONLY : nat, ityp, ntyp => nsp
     USE uspp,                    ONLY : okvan
     USE paw_variables,           ONLY : okpaw
@@ -1034,7 +1035,7 @@ MODULE twobody_hamiltonian
     INTEGER :: i, ii,jj,kk, ia0, iu0, ispin, is1, is2, noa, nob
     INTEGER :: a_beg, a_end, b_beg, b_end, ab_beg, ab_end, nabpair   ! assigned orbitals/pairs
     INTEGER :: naorb, nborb, iabmax,nkloc,k_beg,k_end 
-    INTEGER :: maxv_rank,error,ibnd,ik,ikk,j, maxnorb
+    INTEGER :: maxv_rank,error,ibnd,ik,ikk,j, maxnorb, nabtot
     REAL(DP), ALLOCATABLE :: xkcart(:,:)
     REAL(DP) :: dQ(3),dQ1(3),dk(3), dG(3, 27)
     REAL(DP) :: pnorm, residual, maxv, fXX, fac, max_scl, rtemp, sqDuv
@@ -1059,6 +1060,7 @@ MODULE twobody_hamiltonian
     !
     CHARACTER(len=4) :: str_me_image
     TYPE(h5file_type) :: h5id_orbs, h5id_hamil 
+    TYPE(qeh5_file) :: qeh5_hamil
     !
 
     if(okpaw .or. okvan) &
@@ -1074,9 +1076,10 @@ MODULE twobody_hamiltonian
       h5name = TRIM(hamil_file) //"_part"//adjustl(trim(str_me_image))
     endif
     h5len = LEN_TRIM(h5name)
-    CALL esh5_posthf_open_file(h5id_hamil%id,h5name,h5len,oldh5)
-    if(oldh5 .ne. 0 ) &
-      call errore('cholesky','error opening hamil file',1)
+!    CALL esh5_posthf_open_file(h5id_hamil%id,h5name,h5len,oldh5)
+!    if(oldh5 .ne. 0 ) &
+!      call errore('cholesky','error opening hamil file',1)
+    call qeh5_openfile(qeh5_hamil,h5name,'write')
 
     ! open orbital file 
     h5name = TRIM( orb_file ) 
@@ -1112,7 +1115,8 @@ MODULE twobody_hamiltonian
     !
     ! Data Distribution setup
     !   Partition orbital pairs:  Simple for now, find more memory friendly version
-    call fair_divide(ab_beg,ab_end,me_pool+1,nproc_pool,2*noccmax*maxnorb-noccmax*noccmax)
+    nabtot = 2*noccmax*maxnorb-noccmax*noccmax
+    call fair_divide(ab_beg,ab_end,me_pool+1,nproc_pool,nabtot)
     nabpair = ab_end - ab_beg + 1
     !   Determine assigned orbitals
 ! fix this!!!!
@@ -1511,11 +1515,17 @@ MODULE twobody_hamiltonian
       ncholQ(Q) = nchol
       CALL start_clock ( 'orb_cholwrt' )
 !      if(root_image == me_image) then
-!        call esh5_posthf_cholesky_root(h5id_hamil%id,Q,k_beg-1,nkloc,ab_beg-1,nabpair,nchol,  &
-!                  nksym,maxnorb*maxnorb,nchol_max,Chol(1,1,1,1),error)
+        do ik=1,nkloc 
+          do ispin=1,n_spin
+            ka = k_beg + ik - 1
+            call write_cholesky(Q,ka,ispin,nchol,Chol(:,:,ik,ispin))
+          enddo
+        enddo
+!        call esh5_posthf_cholesky_root(h5id_hamil%id,Q,k_beg-1,n_spin*nkloc,ab_beg-1,nabpair,nchol,  &
+!                  n_spin*nksym,nabtot,nchol_max,Chol(1,1,1,1),error)
 !      else
-!        call esh5_posthf_cholesky(h5id_hamil%id,Q,k_beg-1,nkloc,ab_beg-1,nabpair,nchol,  &
-!                  nksym,maxnorb*maxnorb,nchol_max,Chol(1,1,1,1),error)
+!        call esh5_posthf_cholesky(h5id_hamil%id,Q,k_beg-1,n_spin*nkloc,ab_beg-1,nabpair,nchol,  &
+!                  n_spin*nksym,nabtot,nchol_max,Chol(1,1,1,1),error)
 !      endif
       CALL stop_clock ( 'orb_cholwrt' )
       if(error.ne.0) &
@@ -1596,12 +1606,13 @@ MODULE twobody_hamiltonian
       write(*,*) 'EXX(MF) (Ha):',0.5d0*eX/(nksym*1.0)
     endif
 
+    ! you should find a way to write n_spin in the hamil file
     if(noncolin) then
-      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup+ndown,0,e0*nksym,efc*nksym,nksym,xkcart, &
-                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
+!      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup+ndown,0,e0*nksym,efc*nksym,nksym,xkcart, &
+!                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
     else
-      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup,ndown,e0*nksym,efc*nksym,nksym,xkcart, &
-                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
+!      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup,ndown,e0*nksym,efc*nksym,nksym,xkcart, &
+!                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
     endif
 
     if(ionode) then
@@ -1613,6 +1624,30 @@ MODULE twobody_hamiltonian
       CALL print_clock ( 'orb_diagupd' )
       CALL print_clock ( 'orb_cholwrt' )
     ENDIF
+
+    if(me_image .ne. root_image) then 
+!      CALL esh5_posthf_close_file(h5id_hamil%id)
+      call qeh5_close(qeh5_hamil)
+    endif
+    if(nproc_image > 1) call mp_barrier( intra_image_comm )
+
+    comm( 4*me_image+1 ) = k_beg
+    comm( 4*me_image+2 ) = nkloc
+    comm( 4*me_image+3 ) = ab_beg
+    comm( 4*me_image+4 ) = nabpair
+#if defined (__MPI)
+    call MPI_ALLGATHER( MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, &
+                        comm, 4, MPI_DOUBLE_PRECISION, intra_image_comm, error)
+    if(error .ne. 0) &
+      call errore('cholesky_MO','Error: mpi_allgather',error)
+#endif
+
+    if(ionode) then
+      if(nproc_image > 1) call join_h5(comm)
+      call qeh5_close(qeh5_hamil)
+    endif
+    call close_esh5_read(h5id_orbs)
+    if(nproc_image > 1) call mp_barrier( intra_image_comm )
 
     IF( ALLOCATED(Kqab) ) DEALLOCATE (Kqab)
     IF( ALLOCATED(Vuv) ) DEALLOCATE (Vuv)
@@ -1627,22 +1662,6 @@ MODULE twobody_hamiltonian
     IF( ALLOCATED(weight) ) DEALLOCATE(weight)
     IF( ALLOCATED(eigval) ) DEALLOCATE(eigval)
 
-    if(me_image .ne. root_image) &
-      CALL esh5_posthf_close_file(h5id_hamil%id)
-    if(nproc_image > 1) call mp_barrier( intra_image_comm )
-
-    if(ionode) then
-      h5name = TRIM( hamil_file ) 
-      h5len = LEN_TRIM(h5name)
-      call esh5_posthf_join_all(h5id_hamil%id,h5name,h5len,nksym,nproc_image,error)
-      if(error .ne. 0) then
-        write(*,*) 'Error: ',error
-        call errore('pw2posthf','Error in esh5_posthf_join_all',1)
-      endif
-      CALL esh5_posthf_close_file(h5id_hamil%id)
-    endif
-    call close_esh5_read(h5id_orbs)
-    if(nproc_image > 1) call mp_barrier( intra_image_comm )
 
     CONTAINS
 
@@ -1681,6 +1700,135 @@ MODULE twobody_hamiltonian
             iab = noccmax*norb + ( (ia-noccmax-1) )*noccmax + ib    
           endif
         END SUBROUTINE ia_ib_to_iab
+
+        SUBROUTINE write_cholesky(Q,ka,ispin,nchol,Chol)
+          !
+          IMPLICIT NONE
+          !
+          INTEGER, INTENT(IN) :: Q,ka,ispin,nchol
+          COMPLEX(DP), INTENT(INOUT) :: Chol(:,:)
+          CHARACTER(LEN=4) :: Qstr,kstr,sstr
+          TYPE(qeh5_file) :: ham,moL 
+          TYPE(qeh5_dataset) :: dset
+          INTEGER :: dims(2), offset(2)
+
+          ! Chol(nchol_max,nabpair)
+          call qeh5_open_group(qeh5_hamil, "Hamiltonian", ham)
+          call qeh5_open_group(ham, "MOCholesky", moL)
+
+          write ( Qstr, '(I4)') Q-1 
+          write ( kstr, '(I4)') ka-1 
+          write ( sstr, '(I4)') ispin-1 
+          dset%name = "L"//trim(adjustl(Qstr))//"_k"//  &
+                           trim(adjustl(kstr))//"_s"//trim(adjustl(sstr)) 
+          call qeh5_set_space(dset, Chol(1,1), 2, [nchol_max,nabpair], 'm')
+          if(root_image == me_image) then
+            call qeh5_set_space(dset, Chol(1,1), 2, [nchol,nabtot], 'f')
+            call qeh5_set_file_hyperslab(dset, OFFSET = [0,0], &
+                                               COUNT = [2*nchol,nabpair]) 
+            call qeh5_open_dataset(moL, dset, ACTION = 'write')
+          else 
+            call qeh5_set_space(dset, Chol(1,1), 2, [nchol,nabpair], 'f')
+            call qeh5_open_dataset(moL, dset, ACTION = 'write')
+          endif
+          call qeh5_set_memory_hyperslab(dset, OFFSET = [0,0], &
+                                               COUNT = [2*nchol,nabpair]) 
+          call qeh5_write_dataset(Chol, dset)
+
+          call qeh5_close(dset)
+          call qeh5_close(moL)
+          call qeh5_close(ham)
+          !
+        END SUBROUTINE write_cholesky
+        !
+        SUBROUTINE join_h5(bounds) 
+          USE io_files, ONLY: delete_if_present
+          !
+          IMPLICIT NONE
+          !
+          REAL(DP), INTENT(INOUT) :: bounds(:)
+          !
+          INTEGER :: ip,Q,ka,ispin,nchol,ipool,n
+          CHARACTER(LEN=4) :: Qstr,kstr,sstr
+          TYPE(qeh5_file) :: ip_file,ham,moL,ip_ham,ip_moL
+          TYPE(qeh5_dataset) :: dset,ip_dset
+          INTEGER :: dims(2), offset(2)
+          !
+          call qeh5_open_group(qeh5_hamil, "Hamiltonian", ham)
+          call qeh5_open_group(ham, "MOCholesky", moL)
+          do ipool=1,npool
+          do n=1,nproc_pool
+
+            ip = (ipool-1)*nproc_pool + n-1
+            if(ip==0) cycle 
+        
+            ! read matrix
+            WRITE ( str_me_image, '(I4)') ip 
+            h5name = TRIM(hamil_file) //"_part"//adjustl(trim(str_me_image))
+            call qeh5_openfile(ip_file,h5name,'read')
+            call qeh5_open_group(ip_file, "Hamiltonian", ip_ham)
+            call qeh5_open_group(ip_ham, "MOCholesky", ip_moL)
+
+            ! restrict to symmetry ineq ones
+            do Q = 1,nksym 
+
+            nchol = ncholQ(Q)    
+            do ik = 1,int(bounds(4*ip+2)) 
+
+              ka = int(bounds(4*ip+1)) + ik - 1             
+
+              do ispin = 1,n_spin 
+
+                write ( Qstr, '(I4)') Q-1
+                write ( kstr, '(I4)') ka-1
+                write ( sstr, '(I4)') ispin-1
+                ip_dset%name = "L"//trim(adjustl(Qstr))//"_k"//  &
+                                    trim(adjustl(kstr))//"_s"//trim(adjustl(sstr))
+                call qeh5_set_space(ip_dset, Chol(1,1,1,1), 2, [nchol_max,nabpair], 'm')
+                !call qeh5_set_space(ip_dset, Chol(1,1,1,1), 2, [nchol,int(bounds(4*ip+4))], 'f')
+                call qeh5_open_dataset(ip_moL, ip_dset, ACTION = 'read')
+                call qeh5_set_memory_hyperslab(ip_dset, OFFSET = [0,0], &
+                                   COUNT = [2*nchol,int(bounds(4*ip+4))])
+                call qeh5_read_dataset(Chol(:,:,1,1), ip_dset)
+                call qeh5_close(ip_dset)
+            
+                ! write matrix
+                dset%name = "L"//trim(adjustl(Qstr))//"_k"//  &
+                                 trim(adjustl(kstr))//"_s"//trim(adjustl(sstr))
+                call qeh5_set_space(dset, Chol(1,1,1,1), 2, [nchol_max,nabpair], 'm')
+                if(ipool > 1 .and. n==1) then
+                  call qeh5_set_space(dset, Chol(1,1,1,1), 2, [nchol,nabtot], 'f')
+                  call qeh5_open_dataset(moL, dset, ACTION = 'write')
+                else
+                  call qeh5_open_dataset(moL, dset, ACTION = 'read')
+                endif 
+                call qeh5_set_memory_hyperslab(dset, OFFSET = [0,0], &
+                                   COUNT = [2*nchol,int(bounds(4*ip+4))])
+                call qeh5_set_file_hyperslab(dset, &
+                                   OFFSET = [0,int(bounds(4*ip+3))-1], &
+                                   COUNT = [2*nchol,int(bounds(4*ip+4))])
+                call qeh5_write_dataset(Chol(:,:,1,1), dset)
+                call qeh5_close(dset)
+                !
+              enddo ! ispin
+              !
+            enddo ! ik
+            enddo ! Q 
+            !
+            call qeh5_close(ip_moL)
+            call qeh5_close(ip_ham)
+            call qeh5_close(ip_file)
+            !
+            call delete_if_present(h5name)
+            !
+          enddo ! n
+          enddo ! ipool
+          !
+          call qeh5_close(moL)
+          call qeh5_close(ham)
+          !
+        END SUBROUTINE join_h5 
+        
 
   END SUBROUTINE cholesky_MO_cpu
 
