@@ -1615,16 +1615,6 @@ MODULE twobody_hamiltonian
 !                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
     endif
 
-    if(ionode) then
-      write(*,*) 'Timers: '
-      CALL print_clock ( 'orb_cholesky' )
-      CALL print_clock ( 'orb_comm_ovr' )
-      CALL print_clock ( 'orb_2el' )
-      CALL print_clock ( 'orb_cholvgen' )
-      CALL print_clock ( 'orb_diagupd' )
-      CALL print_clock ( 'orb_cholwrt' )
-    ENDIF
-
     if(me_image .ne. root_image) then 
 !      CALL esh5_posthf_close_file(h5id_hamil%id)
       call qeh5_close(qeh5_hamil)
@@ -1643,12 +1633,27 @@ MODULE twobody_hamiltonian
 #endif
 
     if(ionode) then
-      if(nproc_image > 1) call join_h5(comm)
+      if(nproc_image > 1) then
+        CALL start_clock ( 'orb_join_h5' )
+        call join_h5(comm)
+        CALL start_clock ( 'orb_join_h5' )
+      endif
       call write_hamil_meta()
       call qeh5_close(qeh5_hamil)
     endif
     call close_esh5_read(h5id_orbs)
     if(nproc_image > 1) call mp_barrier( intra_image_comm )
+
+    if(ionode) then
+      write(*,*) 'Timers: '
+      CALL print_clock ( 'orb_cholesky' )
+      CALL print_clock ( 'orb_comm_ovr' )
+      CALL print_clock ( 'orb_2el' )
+      CALL print_clock ( 'orb_cholvgen' )
+      CALL print_clock ( 'orb_diagupd' )
+      CALL print_clock ( 'orb_cholwrt' )
+      if(nproc_image > 1 .and. ionode) CALL print_clock ( 'orb_join_h5' )
+    ENDIF
 
     IF( ALLOCATED(Kqab) ) DEALLOCATE (Kqab)
     IF( ALLOCATED(Vuv) ) DEALLOCATE (Vuv)
@@ -1662,7 +1667,6 @@ MODULE twobody_hamiltonian
     IF( ALLOCATED(ncholQ) ) DEALLOCATE (ncholQ)
     IF( ALLOCATED(weight) ) DEALLOCATE(weight)
     IF( ALLOCATED(eigval) ) DEALLOCATE(eigval)
-
 
     CONTAINS
 

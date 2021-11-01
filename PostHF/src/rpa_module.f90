@@ -121,6 +121,7 @@ MODULE rpa_module
 
     write(*,*)
     write(*,*) 'Starting RPA calculation. '
+    CALL start_clock ( 'rpa' )
 
     if(chol_type.ne.'full' .and. chol_type.ne.'mo') &
       call errore('rpa_cholesky_cpu','Unknown chol_type',1)
@@ -527,6 +528,8 @@ enddo
     elseif(chol_type=='mo') then
       call qeh5_close(qeh5_hamil)
     endif
+
+    CALL stop_clock ( 'rpa' )
     !
     ! deallocate
     if(allocated(noccK)) deallocate(noccK)
