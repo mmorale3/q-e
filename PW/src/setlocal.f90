@@ -17,9 +17,9 @@ SUBROUTINE setlocal
   !
   USE io_global,         ONLY : stdout
   USE kinds,             ONLY : DP
-  USE constants,         ONLY : eps8
-  USE ions_base,         ONLY : zv, ntyp => nsp
-  USE cell_base,         ONLY : omega
+  USE constants,         ONLY : eps8, pi
+  USE ions_base,         ONLY : zv, ntyp => nsp, nat, tau
+  USE cell_base,         ONLY : omega, at, bg
   USE extfield,          ONLY : tefield, dipfield, etotefield, gate, &
                                 etotgatefield !TB
   USE gvect,             ONLY : igtongl, gg
@@ -40,8 +40,10 @@ SUBROUTINE setlocal
   !
   COMPLEX(DP), ALLOCATABLE :: aux(:), v_corr(:)
   ! auxiliary variable
-  INTEGER :: nt, ng
+  INTEGER :: nt, ng, ir, ni, nj, nk, jg, m1j, iat
   LOGICAL :: lmoire
+  DOUBLE PRECISION :: rvec(3), gj(3), vm, phi, g6(3,6)
+  COMPLEX(DP) :: atm_phase, vj
   lmoire = .true.
   ! counter on atom types
   ! counter on g vectors
@@ -51,7 +53,37 @@ SUBROUTINE setlocal
   !
   if (lmoire) then
   vltot(:) = 0.d0
-  else
+  vm = -0.0004042425475865139d0  ! -11 meV in Ha
+  vm = 0.d0
+  phi = 0.45378560551852565  ! 26 degrees
+  call hex_shell(g6)
+  write(stdout, '("     Moire potential on G shell:")')
+  do iat=1,6
+    write(stdout, '("     ",3f11.6)') matmul(transpose(at), g6(:,iat))/(2.d0*pi)
+  enddo
+  nk = 0
+  r_loop: do nj=0,dfftp%nr2-1
+  do ni=0,dfftp%nr1-1
+    ir = 1 + ni + dfftp%nr1x * ( nj + dfftp%nr2x*nk )
+    rvec(1:3) = ni*at(1:3,1)/REAL(dfftp%nr1, DP) + &
+                nj*at(1:3,2)/REAL(dfftp%nr2, DP) + &
+                nk*at(1:3,3)/REAL(dfftp%nr3, DP)
+    ! loop over hex_shell
+    m1j = -1
+    vj = (0.d0, 0.d0)
+    gj_loop: do jg=1,6
+      gj = g6(:,jg)
+      atm_phase = (0.d0, 0.d0)
+      atm_loop: do iat=1,nat
+        atm_phase = atm_phase + exp(-1.d0*m1j*(0.d0, 1.d0)*phi*dot_product(gj,tau(:,iat)))
+      enddo atm_loop
+      vj = vj + atm_phase*exp(m1j*(0.d0, 1.d0)*phi*dot_product(gj,rvec))
+      m1j = -1*m1j
+    enddo gj_loop
+    vltot(ir) = vm*vj
+  enddo
+  enddo r_loop
+  else ! not lmoire
   IF (do_comp_mt) THEN
      ALLOCATE( v_corr(ngm) )
      CALL wg_corr_loc( omega, ntyp, ngm, zv, strf, v_corr )
@@ -129,3 +161,30 @@ SUBROUTINE setlocal
   !
 END SUBROUTINE setlocal
 
+subroutine hex_shell(g6_out)
+  USE constants,         ONLY : eps8, pi
+  USE cell_base,         ONLY : bg, tpiba
+  implicit none
+  double precision, intent(out) :: g6_out(3,6)
+  double precision :: g1(3), g6(3,6), angles(6)
+  integer iangs(6), ih, ib1, ib2
+  ! sort first shell of neighbors counter-clockwise from 9 o'clock (iangs)
+  ih = 1
+  do ib1 = -1,1
+  do ib2 = -1,1
+    g1 = ib1*bg(:, 1)*tpiba + ib2*bg(:, 2)*tpiba
+    if (abs(g1(3)) > eps8) continue
+    if (abs(norm2(g1)-4.d0*pi/sqrt(3.d0)) < eps8) then
+      if (ih > 6) call errore('setlocal', 'more than 6 k points in first shell', 1)
+      g6(1:3,ih) = g1(1:3)
+      angles(ih) = atan(g1(2), g1(1))
+      ih = ih+1
+    endif
+  enddo
+  if (abs(g1(3)) < eps8) continue
+  enddo
+  call hpsort(6, angles, iangs)
+  do ih=1,6
+    g6_out(:,ih) = g6(:,iangs(ih))
+  enddo
+end subroutine hex_shell
