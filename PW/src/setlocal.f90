@@ -41,12 +41,17 @@ SUBROUTINE setlocal
   COMPLEX(DP), ALLOCATABLE :: aux(:), v_corr(:)
   ! auxiliary variable
   INTEGER :: nt, ng
+  LOGICAL :: lmoire
+  lmoire = .true.
   ! counter on atom types
   ! counter on g vectors
   !
   ALLOCATE( aux(dfftp%nnr) )
   aux(:) = (0.d0,0.d0)
   !
+  if (lmoire) then
+  vltot(:) = 0.d0
+  else
   IF (do_comp_mt) THEN
      ALLOCATE( v_corr(ngm) )
      CALL wg_corr_loc( omega, ntyp, ngm, zv, strf, v_corr )
@@ -96,6 +101,7 @@ SUBROUTINE setlocal
   CALL invfft( 'Rho', aux, dfftp )
   !
   vltot(:) =  DBLE( aux(:) )
+  endif ! lmoire
   !
   ! ... If required add an electric field to the local potential 
   !

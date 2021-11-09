@@ -79,7 +79,7 @@ SUBROUTINE sum_vrs( nrxx, nspin, vltot, vr, vrs )
         !
         vrs(:,is) = vr(:,is)
      ELSE
-        vrs(:,is) = vltot(:) + vr(:,is)
+        vrs(:,is) = vltot(:) !+ vr(:,is)
      ENDIF
      !
   ENDDO

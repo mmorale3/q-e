@@ -491,7 +491,9 @@ SUBROUTINE electrons_scf ( printout, exxen )
   !! auxiliary variables for grimme-d3
   LOGICAL :: lhb
   !! if .TRUE. then background states are present (DFT+U)
+  LOGICAL :: lmoire
   !
+  lmoire = .true.
   lhb = .FALSE.
   IF ( lda_plus_u )  THEN
      DO nt = 1, ntyp
@@ -515,12 +517,16 @@ SUBROUTINE electrons_scf ( printout, exxen )
   !
   ! ... calculates the ewald contribution to total energy
   !
+  if (lmoire) then
+   ewld = 0.d0
+  else
   IF ( do_comp_esm ) THEN
      ewld = esm_ewald()
   ELSE
      ewld = ewald( alat, nat, nsp, ityp, zv, at, bg, tau, &
                 omega, g, gg, ngm, gcutm, gstart, gamma_only, strf )
   ENDIF
+  endif ! lmoire
   !
   IF ( llondon ) THEN
      elondon = energy_london( alat , nat , ityp , at ,bg , tau )
