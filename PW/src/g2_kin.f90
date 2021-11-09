@@ -23,17 +23,19 @@ SUBROUTINE g2_kin( ik )
   IMPLICIT NONE
   !
   INTEGER, INTENT(IN) :: ik
+  DOUBLE PRECISION :: wm
   !
   ! ... local variables
   !
   INTEGER :: ig, npw
   !
   !
+  wm = 2*7.111835442262301e-05  ! am = 75 nm, mstar = 0.35
   CALL using_g2kin(1)
   npw = ngk(ik)
   g2kin(1:npw) = ( ( xk(1,ik) + g(1,igk_k(1:npw,ik)) )**2 + &
                    ( xk(2,ik) + g(2,igk_k(1:npw,ik)) )**2 + &
-                   ( xk(3,ik) + g(3,igk_k(1:npw,ik)) )**2 ) * tpiba2
+                   ( xk(3,ik) + g(3,igk_k(1:npw,ik)) )**2 ) * tpiba2 * wm
   !
   IF ( qcutz > 0.D0 ) THEN
      !
