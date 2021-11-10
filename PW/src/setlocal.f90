@@ -41,9 +41,8 @@ SUBROUTINE setlocal
   !
   COMPLEX(DP), ALLOCATABLE :: aux(:), v_corr(:)
   ! auxiliary variable
-  INTEGER :: nt, ng, ir, ni, nj, nk, jg, m1j, iat
-  DOUBLE PRECISION :: rvec(3), gj(3), vm, phi, g6(3,6)
-  COMPLEX(DP) :: atm_phase, vj
+  INTEGER :: nt, ng, ir, ni, nj, nk, jg, iat
+  DOUBLE PRECISION :: rvec(3), gj(3), vm, phi, g6(3,6), vj
   ! counter on atom types
   ! counter on g vectors
   !
@@ -67,18 +66,13 @@ SUBROUTINE setlocal
                 nj*at(1:3,2)/REAL(dfftp%nr2, DP) + &
                 nk*at(1:3,3)/REAL(dfftp%nr3, DP)
     ! loop over hex_shell
-    m1j = -1
-    vj = (0.d0, 0.d0)
-    gj_loop: do jg=1,6
-      gj = g6(:,jg)
-      atm_phase = (0.d0, 0.d0)
-      atm_loop: do iat=1,nat
-        atm_phase = atm_phase + exp(-1.d0*m1j*(0.d0, 1.d0)*phi*dot_product(gj,tau(:,iat)))
-      enddo atm_loop
-      vj = vj + atm_phase*exp(m1j*(0.d0, 1.d0)*phi*dot_product(gj,rvec))
-      m1j = -1*m1j
+    vj = 0.d0
+    gj_loop: do jg=1,3
+      gj = g6(:,2*jg)
+      vj = vj+2*cos(phi+dot_product(gj,rvec))
     enddo gj_loop
     vltot(ir) = vm*vj
+    !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo
   enddo r_loop
   v_of_0 = sum(vltot)/dfftp%nnr
