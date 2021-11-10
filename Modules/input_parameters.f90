@@ -630,7 +630,22 @@ MODULE input_parameters
         !! in rhombohedral axes. If FALSE in hexagonal axes, that are
         !! converted internally in rhombohedral axes.  
         !
-
+        LOGICAL :: lmoire = .false.
+        !! Use 2D moire potential
+        !
+        ! the following are the needed parameters for 2D moire potential
+        REAL(DP) :: amoire_in_nm = 1.d0
+        !! moire lattice constant in nm
+        !
+        REAL(DP) :: vmoire_in_mev = 0.d0
+        !! moire potential depth in meV
+        !
+        REAL(DP) :: pmoire_in_deg = 60.d0
+        !! moire potential "shape" in degrees
+        !
+        REAL(DP) :: mstar = 1.d0
+        !! effective mass of electrons in lowest band
+        !
 
 
         NAMELIST / system / ibrav, celldm, a, b, c, cosab, cosac, cosbc, nat, &
@@ -665,7 +680,8 @@ MODULE input_parameters
              lgcscf, gcscf_ignore_mun, gcscf_mu, gcscf_conv_thr,              &
              gcscf_gk, gcscf_gh, gcscf_beta,                                  &
              space_group, uniqueb, origin_choice, rhombohedral,               &
-             zgate, relaxz, block, block_1, block_2, block_height
+             zgate, relaxz, block, block_1, block_2, block_height,            &
+             lmoire, amoire_in_nm, vmoire_in_mev, pmoire_in_deg, mstar
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters

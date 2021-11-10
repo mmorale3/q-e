@@ -17,7 +17,7 @@ SUBROUTINE setlocal
   !
   USE io_global,         ONLY : stdout
   USE kinds,             ONLY : DP
-  USE constants,         ONLY : eps8, pi
+  USE constants,         ONLY : eps8, pi, AUTOEV
   USE ions_base,         ONLY : zv, ntyp => nsp, nat, tau
   USE cell_base,         ONLY : omega, at, bg
   USE extfield,          ONLY : tefield, dipfield, etotefield, gate, &
@@ -35,16 +35,15 @@ SUBROUTINE setlocal
   USE esm,               ONLY : esm_local, esm_bc, do_comp_esm
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
+  USE input_parameters,  ONLY : lmoire, vmoire_in_mev, pmoire_in_deg
   !
   IMPLICIT NONE
   !
   COMPLEX(DP), ALLOCATABLE :: aux(:), v_corr(:)
   ! auxiliary variable
   INTEGER :: nt, ng, ir, ni, nj, nk, jg, m1j, iat
-  LOGICAL :: lmoire
   DOUBLE PRECISION :: rvec(3), gj(3), vm, phi, g6(3,6)
   COMPLEX(DP) :: atm_phase, vj
-  lmoire = .true.
   ! counter on atom types
   ! counter on g vectors
   !
@@ -53,11 +52,10 @@ SUBROUTINE setlocal
   !
   if (lmoire) then
   vltot(:) = 0.d0
-  vm = -0.0004042425475865139d0  ! -11 meV in Ha
-  vm = 0.d0
-  phi = 0.45378560551852565  ! 26 degrees
+  vm = vmoire_in_mev*1e-3/AUTOEV
+  phi = pmoire_in_deg/180.d0*pi
   call hex_shell(g6)
-  write(stdout, '("     Moire potential on G shell:")')
+  write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
   do iat=1,6
     write(stdout, '("     ",3f11.6)') matmul(transpose(at), g6(:,iat))/(2.d0*pi)
   enddo
@@ -83,6 +81,8 @@ SUBROUTINE setlocal
     vltot(ir) = vm*vj
   enddo
   enddo r_loop
+  v_of_0 = sum(vltot)/dfftp%nnr
+  write(stdout, '("     Moire V(G=0): ", f11.6, " ha")') v_of_0
   else ! not lmoire
   IF (do_comp_mt) THEN
      ALLOCATE( v_corr(ngm) )

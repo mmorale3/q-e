@@ -436,6 +436,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE wvfct_gpum,           ONLY : using_et
   USE scf_gpum,             ONLY : using_vrs
   USE device_fbuff_m,             ONLY : dev_buf, pin_buf
+  USE input_parameters,     ONLY : lmoire
   !
   IMPLICIT NONE
   !
@@ -491,9 +492,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
   !! auxiliary variables for grimme-d3
   LOGICAL :: lhb
   !! if .TRUE. then background states are present (DFT+U)
-  LOGICAL :: lmoire
   !
-  lmoire = .true.
   lhb = .FALSE.
   IF ( lda_plus_u )  THEN
      DO nt = 1, ntyp
