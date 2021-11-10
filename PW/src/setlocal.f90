@@ -71,7 +71,7 @@ SUBROUTINE setlocal
       gj = g6(:,2*jg)
       vj = vj+2*cos(phi+dot_product(gj,rvec))
     enddo gj_loop
-    vltot(ir) = vm*vj
+    vltot(ir) = vm*vj/omega
     !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo
   enddo r_loop
