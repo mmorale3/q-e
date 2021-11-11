@@ -19,23 +19,30 @@ SUBROUTINE g2_kin( ik )
   USE gvecw,                ONLY : ecfixed, qcutz, q2sigma
   USE wvfct,                ONLY : g2kin
   USE wvfct_gpum,           ONLY : using_g2kin
+  USE constants,            ONLY : BOHR_RADIUS_ANGS
+  USE input_parameters,     ONLY : lmoire, amoire_in_ang, mstar
   !
   IMPLICIT NONE
   !
   INTEGER, INTENT(IN) :: ik
-  DOUBLE PRECISION :: wm
   !
   ! ... local variables
   !
   INTEGER :: ig, npw
+  DOUBLE PRECISION :: wm, amoire, k2pre
   !
-  !
-  wm = 2*7.111835442262301e-05  ! am = 75 nm, mstar = 0.35
+  if (lmoire) then
+    amoire = amoire_in_ang/BOHR_RADIUS_ANGS
+    wm = 1.d0/(mstar*amoire**2)
+    k2pre = tpiba2*wm
+  else
+    k2pre = tpiba2
+  endif
   CALL using_g2kin(1)
   npw = ngk(ik)
   g2kin(1:npw) = ( ( xk(1,ik) + g(1,igk_k(1:npw,ik)) )**2 + &
                    ( xk(2,ik) + g(2,igk_k(1:npw,ik)) )**2 + &
-                   ( xk(3,ik) + g(3,igk_k(1:npw,ik)) )**2 ) * tpiba2 * wm
+                   ( xk(3,ik) + g(3,igk_k(1:npw,ik)) )**2 ) * k2pre
   !
   IF ( qcutz > 0.D0 ) THEN
      !

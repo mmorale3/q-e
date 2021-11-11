@@ -634,8 +634,8 @@ MODULE input_parameters
         !! Use 2D moire potential
         !
         ! the following are the needed parameters for 2D moire potential
-        REAL(DP) :: amoire_in_nm = 1.d0
-        !! moire lattice constant in nm
+        REAL(DP) :: amoire_in_ang = 1.d0
+        !! moire lattice constant in Angstrom
         !
         REAL(DP) :: vmoire_in_mev = 0.d0
         !! moire potential depth in meV
@@ -681,7 +681,7 @@ MODULE input_parameters
              gcscf_gk, gcscf_gh, gcscf_beta,                                  &
              space_group, uniqueb, origin_choice, rhombohedral,               &
              zgate, relaxz, block, block_1, block_2, block_height,            &
-             lmoire, amoire_in_nm, vmoire_in_mev, pmoire_in_deg, mstar
+             lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters
