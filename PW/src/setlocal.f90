@@ -160,22 +160,23 @@ subroutine hex_shell(g6_out)
   USE cell_base,         ONLY : bg, tpiba
   implicit none
   double precision, intent(out) :: g6_out(3,6)
-  double precision :: g1(3), g6(3,6), angles(6)
+  double precision :: g1(3), g6(3,6), angles(6), bmag
   integer iangs(6), ih, ib1, ib2
+  g6_out(:,:) = 0.d0
+  bmag = tpiba * 2.d0/3.d0**0.5 ! first shell
   ! sort first shell of neighbors counter-clockwise from 9 o'clock (iangs)
   ih = 1
   do ib1 = -1,1
   do ib2 = -1,1
     g1 = ib1*bg(:, 1)*tpiba + ib2*bg(:, 2)*tpiba
-    if (abs(g1(3)) > eps8) continue
-    if (abs(norm2(g1)-4.d0*pi/sqrt(3.d0)) < eps8) then
-      if (ih > 6) call errore('setlocal', 'more than 6 k points in first shell', 1)
-      g6(1:3,ih) = g1(1:3)
+    if (abs(g1(3)) > eps8) call errore('hex_shell', 'z component', 1)
+    if (abs(norm2(g1)-bmag) < eps8) then
+      if (ih > 6) call errore('hex_shell', 'more than 6 k points in first shell', 1)
+      g6(:,ih) = g1
       angles(ih) = atan2(g1(2), g1(1))
       ih = ih+1
     endif
   enddo
-  if (abs(g1(3)) < eps8) continue
   enddo
   call hpsort(6, angles, iangs)
   do ih=1,6
