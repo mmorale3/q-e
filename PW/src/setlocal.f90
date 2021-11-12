@@ -171,7 +171,7 @@ subroutine hex_shell(g6_out)
     if (abs(norm2(g1)-4.d0*pi/sqrt(3.d0)) < eps8) then
       if (ih > 6) call errore('setlocal', 'more than 6 k points in first shell', 1)
       g6(1:3,ih) = g1(1:3)
-      angles(ih) = atan(g1(2), g1(1))
+      angles(ih) = atan2(g1(2), g1(1))
       ih = ih+1
     endif
   enddo
