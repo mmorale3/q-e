@@ -510,19 +510,21 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   !----------------------------------------------------------------------------
   !! Hartree potential VH(r) from n(G)
   !
-  USE constants,         ONLY : fpi, e2
+  USE constants,         ONLY : fpi, e2, tpi, eps8
+  USE constants,         ONLY : BOHR_RADIUS_ANGS
   USE kinds,             ONLY : DP
   USE fft_base,          ONLY : dfftp
   USE fft_interfaces,    ONLY : invfft
-  USE gvect,             ONLY : ngm, gg, gstart
+  USE gvect,             ONLY : ngm, gg, gstart, g
   USE lsda_mod,          ONLY : nspin
-  USE cell_base,         ONLY : omega, tpiba2
+  USE cell_base,         ONLY : omega, tpiba2, tpiba
   USE control_flags,     ONLY : gamma_only
   USE mp_bands,          ONLY : intra_bgrp_comm
   USE mp,                ONLY : mp_sum
   USE martyna_tuckerman, ONLY : wg_corr_h, do_comp_mt
   USE esm,               ONLY : do_comp_esm, esm_hartree, esm_bc
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_2D, cutoff_hartree  
+  USE input_parameters,  ONLY : lmoire, epsmoire, amoire_in_ang
   !
   IMPLICIT NONE
   !
@@ -542,6 +544,8 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   INTEGER               :: is, ig
   COMPLEX(DP), ALLOCATABLE :: aux(:), rgtot(:), vaux(:)
   INTEGER               :: nt
+  double precision :: amoire
+  amoire = amoire_in_ang/BOHR_RADIUS_ANGS
   !
   CALL start_clock( 'v_h' )
   !
@@ -575,7 +579,12 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
 !$omp parallel do private( fac, rgtot_re, rgtot_im ), reduction(+:ehart)
         DO ig = gstart, ngm
            !
+           if (lmoire) then
+           if (abs(g(3,ig)) > eps8) cycle
+           fac = 1.D0 / sqrt(gg(ig))
+           else
            fac = 1.D0 / gg(ig) 
+           endif ! lmoire
            !
            rgtot_re = REAL(  rhog(ig) )
            rgtot_im = AIMAG( rhog(ig) )
@@ -589,7 +598,11 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
 !$omp end parallel do
      ENDIF
      !
+     if (lmoire) then
+     fac = e2 * tpi / tpiba / (epsmoire*amoire)
+     else
      fac = e2 * fpi / tpiba2
+     endif ! lmoire
      !
      ehart = ehart * fac
      !
@@ -631,6 +644,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   ! ... transform hartree potential to real space
   !
   CALL invfft('Rho', aux, dfftp)
+  if (lmoire) aux(:) = aux(:) * dfftp%nr3x
   !
   ! ... add hartree potential to the xc potential
   !
