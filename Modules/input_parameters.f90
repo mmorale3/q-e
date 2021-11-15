@@ -32,6 +32,7 @@ MODULE input_parameters
   USE parameters, ONLY : nsx, natx, sc_size
   USE wannier_new,ONLY : wannier_data
   USE upf_params, ONLY : lqmax
+  USE constants,  ONLY : BOHR_RADIUS_ANGS
   !
   IMPLICIT NONE
   !
@@ -634,7 +635,7 @@ MODULE input_parameters
         !! Use 2D moire potential
         !
         ! the following are the needed parameters for 2D moire potential
-        REAL(DP) :: amoire_in_ang = 1.d0
+        REAL(DP) :: amoire_in_ang = BOHR_RADIUS_ANGS
         !! moire lattice constant in Angstrom
         !
         REAL(DP) :: vmoire_in_mev = 0.d0
