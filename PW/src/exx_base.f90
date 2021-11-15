@@ -720,7 +720,9 @@ MODULE exx_base
     !
     USE kinds,      ONLY : DP
     USE cell_base,  ONLY : tpiba, at, tpiba2
-    USE constants,  ONLY : fpi, e2, pi
+    USE constants,  ONLY : fpi, e2, pi, tpi, eps8
+    USE constants,  ONLY : BOHR_RADIUS_ANGS
+    USE input_parameters, ONLY : lmoire, epsmoire, amoire_in_ang
     !
     IMPLICIT NONE
     !
@@ -742,6 +744,8 @@ MODULE exx_base
     REAL(DP) :: grid_factor_track(ngm), qq_track(ngm)
     REAL(DP) :: nqhalf_dble(3)
     LOGICAL :: odg(3)
+    double precision :: amoire
+    amoire = amoire_in_ang/BOHR_RADIUS_ANGS
     !
     ! ... First the types of Coulomb potential that need q(3) and an external call
     IF( use_coulomb_vcut_ws ) THEN
@@ -811,7 +815,12 @@ MODULE exx_base
          ELSEIF( erf_scrlen > 0 ) THEN
             fac(ig) = e2*fpi/qq*(EXP(-qq/4._DP/erf_scrlen**2)) * grid_factor_track(ig)
          ELSE
+            if (lmoire) then
+            if (abs(g(3,ig)) > eps8) cycle
+            fac(ig) = e2*tpi/( sqrt(qq) + yukawa )/(epsmoire*amoire) * grid_factor_track(ig)
+            else
             fac(ig) = e2*fpi/( qq + yukawa ) * grid_factor_track(ig) ! as HARTREE
+            endif ! lmoire
          ENDIF
          !
       ELSE
