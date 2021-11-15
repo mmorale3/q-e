@@ -27,6 +27,7 @@ SUBROUTINE setlocal
   USE vlocal,            ONLY : strf, vloc
   USE fft_base,          ONLY : dfftp
   USE fft_interfaces,    ONLY : invfft
+  USE fft_types,         ONLY : fft_index_to_3d
   USE gvect,             ONLY : ngm
   USE control_flags,     ONLY : gamma_only
   USE mp_bands,          ONLY : intra_bgrp_comm
@@ -36,26 +37,21 @@ SUBROUTINE setlocal
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
   USE input_parameters,  ONLY : lmoire, vmoire_in_mev, pmoire_in_deg
-  USE scatter_mod,       ONLY : scatter_grid
   !
   IMPLICIT NONE
   !
   COMPLEX(DP), ALLOCATABLE :: aux(:), v_corr(:)
   ! auxiliary variable
-  INTEGER :: nt, ng, ir, ni, nj, nk, jg, iat, nxxr
-  DOUBLE PRECISION :: rvec(3), gj(3), vm, phi, g6(3,6), vj
-  double precision, allocatable :: vltot_all(:)
+  INTEGER :: nt, ng
   ! counter on atom types
   ! counter on g vectors
   !
-  ALLOCATE( aux(dfftp%nnr) )
-  aux(:) = (0.d0,0.d0)
+  double precision :: rfrac(3), rvec(3), gj(3), vm, phi, g6(3,6), vj
+  integer :: ir, i, j, k, jg, iat
+  logical :: offrange
   !
   if (lmoire) then
   vltot(:) = 0.d0
-  nxxr = dfftp%nr1x * dfftp%nr2x * dfftp%nr3x
-  ALLOCATE( vltot_all(nxxr) )
-  vltot_all(:) = 0.d0
   vm = vmoire_in_mev*1e-3/AUTOEV
   phi = pmoire_in_deg/180.d0*pi
   call hex_shell(g6)
@@ -63,28 +59,31 @@ SUBROUTINE setlocal
   do iat=1,6
     write(stdout, '("     ",3f11.6)') matmul(transpose(at), g6(:,iat))/(2.d0*pi)
   enddo
-  nk = 0
-  r_loop: do nj=0,dfftp%nr2-1
-  do ni=0,dfftp%nr1-1
-    ir = 1 + ni + dfftp%nr1x * ( nj + dfftp%nr2x*nk )
-    rvec(1:3) = ni*at(1:3,1)/REAL(dfftp%nr1, DP) + &
-                nj*at(1:3,2)/REAL(dfftp%nr2, DP) + &
-                nk*at(1:3,3)/REAL(dfftp%nr3, DP)
+  r_loop: do ir = 1, dfftp%nnr
+    call fft_index_to_3d(ir, dfftp, i,j,k, offrange)
+    if ( offrange ) cycle
+    if ( k .ne. 0 ) cycle
+    !
+    rfrac(1) = DBLE(i)/DBLE(dfftp%nr1)
+    rfrac(2) = DBLE(j)/DBLE(dfftp%nr2)
+    rfrac(3) = DBLE(k)/DBLE(dfftp%nr3)
+    !
+    rvec = matmul(at, rfrac)
     ! loop over hex_shell
     vj = 0.d0
     gj_loop: do jg=1,3
       gj = g6(:,2*jg)
       vj = vj+2*cos(phi+dot_product(gj,rvec))
     enddo gj_loop
-    vltot_all(ir) = vm*vj/omega
+    vltot(ir) = vm*vj/omega
     !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
-  enddo
   enddo r_loop
-  call scatter_grid(dfftp, vltot_all, vltot)
-  v_of_0 = sum(vltot_all)/nxxr
-  write(stdout, '("     Moire V(G=0): ", f11.6, " ha")') v_of_0
-  DEALLOCATE( vltot_all )
+  v_of_0 = sum(vltot)/dfftp%nnr
+  call mp_sum(v_of_0, intra_bgrp_comm)
+  write(stdout, '("     Moire V(G=0): ", f11.6, " meV")') v_of_0*AUTOEV*1e3
   else ! not lmoire
+  ALLOCATE( aux(dfftp%nnr) )
+  aux(:) = (0.d0,0.d0)
   IF (do_comp_mt) THEN
      ALLOCATE( v_corr(ngm) )
      CALL wg_corr_loc( omega, ntyp, ngm, zv, strf, v_corr )
@@ -134,6 +133,8 @@ SUBROUTINE setlocal
   CALL invfft( 'Rho', aux, dfftp )
   !
   vltot(:) =  DBLE( aux(:) )
+  !
+  DEALLOCATE( aux )
   endif ! lmoire
   !
   ! ... If required add an electric field to the local potential 
@@ -154,8 +155,6 @@ SUBROUTINE setlocal
   ! ... Save vltot for possible modifications in plugins
   !
   CALL plugin_init_potential( vltot )
-  !
-  DEALLOCATE( aux )
   !
   !
   RETURN
