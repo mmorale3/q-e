@@ -644,6 +644,9 @@ MODULE input_parameters
         REAL(DP) :: pmoire_in_deg = 60.d0
         !! moire potential "shape" in degrees
         !
+        REAL(DP) :: epsmoire = 1.d0
+        !! moire in-plane dielectric constant
+        !
         REAL(DP) :: mstar = 1.d0
         !! effective mass of electrons in lowest band
         !
@@ -682,7 +685,8 @@ MODULE input_parameters
              gcscf_gk, gcscf_gh, gcscf_beta,                                  &
              space_group, uniqueb, origin_choice, rhombohedral,               &
              zgate, relaxz, block, block_1, block_2, block_height,            &
-             lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar
+             lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar,      &
+             epsmoire
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters
