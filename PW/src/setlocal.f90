@@ -36,13 +36,15 @@ SUBROUTINE setlocal
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
   USE input_parameters,  ONLY : lmoire, vmoire_in_mev, pmoire_in_deg
+  USE scatter_mod,       ONLY : scatter_grid
   !
   IMPLICIT NONE
   !
   COMPLEX(DP), ALLOCATABLE :: aux(:), v_corr(:)
   ! auxiliary variable
-  INTEGER :: nt, ng, ir, ni, nj, nk, jg, iat
+  INTEGER :: nt, ng, ir, ni, nj, nk, jg, iat, nxxr
   DOUBLE PRECISION :: rvec(3), gj(3), vm, phi, g6(3,6), vj
+  double precision, allocatable :: vltot_all(:)
   ! counter on atom types
   ! counter on g vectors
   !
@@ -51,6 +53,9 @@ SUBROUTINE setlocal
   !
   if (lmoire) then
   vltot(:) = 0.d0
+  nxxr = dfftp%nr1x * dfftp%nr2x * dfftp%nr3x
+  ALLOCATE( vltot_all(nxxr) )
+  vltot_all(:) = 0.d0
   vm = vmoire_in_mev*1e-3/AUTOEV
   phi = pmoire_in_deg/180.d0*pi
   call hex_shell(g6)
@@ -71,12 +76,14 @@ SUBROUTINE setlocal
       gj = g6(:,2*jg)
       vj = vj+2*cos(phi+dot_product(gj,rvec))
     enddo gj_loop
-    vltot(ir) = vm*vj/omega
+    vltot_all(ir) = vm*vj/omega
     !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo
   enddo r_loop
-  v_of_0 = sum(vltot)/dfftp%nnr
+  call scatter_grid(dfftp, vltot_all, vltot)
+  v_of_0 = sum(vltot_all)/nxxr
   write(stdout, '("     Moire V(G=0): ", f11.6, " ha")') v_of_0
+  DEALLOCATE( vltot_all )
   else ! not lmoire
   IF (do_comp_mt) THEN
      ALLOCATE( v_corr(ngm) )
@@ -178,8 +185,60 @@ subroutine hex_shell(g6_out)
     endif
   enddo
   enddo
-  call hpsort(6, angles, iangs)
+  call merge_argsort(6, angles, iangs)
   do ih=1,6
     g6_out(:,ih) = g6(:,iangs(ih))
   enddo
 end subroutine hex_shell
+
+subroutine merge_argsort(nr, r, d)
+  implicit none
+  integer, intent(in) :: nr
+  real(kind=8), intent(in), dimension(nr) :: r
+  integer, intent(out), dimension(nr) :: d
+  
+  integer, dimension(nr) :: il
+
+  integer :: stepsize
+  integer :: i,j,left,k,ksize
+  
+  do i=1,nr
+    d(i)=i
+  end do
+  
+  if ( nr==1 ) return
+  
+  stepsize = 1
+  do while (stepsize<nr)
+    do left=1,nr-stepsize,stepsize*2
+      i = left
+      j = left+stepsize
+      ksize = min(stepsize*2,nr-left+1)
+      k=1
+  
+      do while ( i<left+stepsize .and. j<left+ksize )
+        if ( r(d(i))>r(d(j)) ) then
+          il(k)=d(i)
+          i=i+1
+          k=k+1
+        else
+          il(k)=d(j)
+          j=j+1
+          k=k+1
+        endif
+      enddo
+  
+      if ( i<left+stepsize ) then
+        ! fill up remaining from left
+        il(k:ksize) = d(i:left+stepsize-1)
+      else
+        ! fill up remaining from right
+        il(k:ksize) = d(j:left+ksize-1)
+      endif
+      d(left:left+ksize-1) = il(1:ksize)
+    end do
+    stepsize=stepsize*2
+  end do
+
+  return
+end subroutine merge_argsort
