@@ -17,7 +17,7 @@ SUBROUTINE setlocal
   !
   USE io_global,         ONLY : stdout
   USE kinds,             ONLY : DP
-  USE constants,         ONLY : eps8, pi, AUTOEV
+  USE constants,         ONLY : eps8, pi, AUTOEV, e2
   USE ions_base,         ONLY : zv, ntyp => nsp, nat, tau
   USE cell_base,         ONLY : omega, at, bg
   USE extfield,          ONLY : tefield, dipfield, etotefield, gate, &
@@ -52,7 +52,7 @@ SUBROUTINE setlocal
   !
   if (lmoire) then
   vltot(:) = 0.d0
-  vm = vmoire_in_mev*1e-3/AUTOEV
+  vm = vmoire_in_mev*1e-3/AUTOEV*e2  ! e2 converts Ha to Ry
   phi = pmoire_in_deg/180.d0*pi
   call hex_shell(g6)
   write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
@@ -75,7 +75,7 @@ SUBROUTINE setlocal
       gj = g6(:,2*jg)
       vj = vj+2*cos(phi+dot_product(gj,rvec))
     enddo gj_loop
-    vltot(ir) = vm*vj/omega
+    vltot(ir) = vm*vj
     !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo r_loop
   v_of_0 = sum(vltot)/dfftp%nnr
