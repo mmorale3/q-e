@@ -817,7 +817,7 @@ MODULE exx_base
          ELSE
             if (lmoire) then
             if (abs(g(3,ig)) > eps8) cycle
-            fac(ig) = e2*tpi/( sqrt(qq) + yukawa )/(epsmoire*amoire) * grid_factor_track(ig)
+            fac(ig) = e2*tpi/( sqrt(qq) + yukawa )/(epsmoire*amoire)*at(3,3) * grid_factor_track(ig)
             else
             fac(ig) = e2*fpi/( qq + yukawa ) * grid_factor_track(ig) ! as HARTREE
             endif ! lmoire
