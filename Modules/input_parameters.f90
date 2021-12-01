@@ -1024,6 +1024,10 @@ MODULE input_parameters
         !! Time step for CP-BO electron minimization dynamics, in atomic units.
         !! CP: \(1 \text{a.u. of time} = 2.4189\cdot 10^{-17} s\), PW: twice that much.
 
+        LOGICAL :: extra_cycle = .false.
+        !! one more electrons_scf after exx convergence for energy components
+        !
+
         NAMELIST / electrons / emass, emass_cutoff, orthogonalization, &
           electron_maxstep, scf_must_converge, ortho_eps, ortho_max, electron_dynamics,   &
           electron_damping, electron_velocities, electron_temperature, &
@@ -1044,7 +1048,7 @@ MODULE input_parameters
           occupation_constraints, niter_cg_restart,                    &
           niter_cold_restart, lambda_cold, efield_cart, real_space,    &
           tcpbo,emass_emin, emass_cutoff_emin, electron_damping_emin,  &
-          dt_emin, efield_phase
+          dt_emin, efield_phase, extra_cycle
 
 !
 !=----------------------------------------------------------------------------=!

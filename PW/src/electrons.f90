@@ -51,7 +51,7 @@ SUBROUTINE electrons()
   !
   USE wvfct_gpum,           ONLY : using_et, using_wg, using_wg_d
   USE scf_gpum,             ONLY : using_vrs
-
+  USE input_parameters,     ONLY : extra_cycle
   !
   IMPLICIT NONE
   !
@@ -283,6 +283,13 @@ SUBROUTINE electrons()
         !
         IF ( dexx < tr2_final ) THEN
            WRITE( stdout, 9066 ) '!!', etot, hwf_energy
+           if (extra_cycle) then
+             printout = 2
+             call electrons_scf(printout, exxen)
+             write( stdout, 9069 ) eband+deband-2*exxen
+             write( stdout, 9070 ) ehart
+             write( stdout, 9071 ) exxen
+           endif
         ELSE
            WRITE( stdout, 9066 ) '  ', etot, hwf_energy
         ENDIF
@@ -344,6 +351,9 @@ SUBROUTINE electrons()
             /'     Harris-Foulkes estimate   =',0PF17.8,' Ry' )
 9067 FORMAT('     est. exchange err (dexx)  =',0PF17.8,' Ry' )
 9068 FORMAT('     est. exchange err (dexx)  =',1PE17.1,' Ry' )
+9069 FORMAT( '    E1 (T+V)                   =',0PF17.8,' Ry' )
+9070 FORMAT( '    EJ (ehart)                 =',0PF17.8,' Ry' )
+9071 FORMAT( '    EX (exxen)                 =',0PF17.8,' Ry' )
 9101 FORMAT(/'     EXX self-consistency reached' )
 9120 FORMAT(/'     EXX convergence NOT achieved after ',i3,' iterations: stopping' )
 9121 FORMAT(/'     scf convergence threshold =',1PE17.1,' Ry' )

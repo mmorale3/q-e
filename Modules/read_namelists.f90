@@ -991,6 +991,7 @@ MODULE read_namelists_module
        !
        IMPLICIT NONE
        !
+       CALL mp_bcast( extra_cycle,          ionode_id, intra_image_comm )
        CALL mp_bcast( emass,                ionode_id, intra_image_comm )
        CALL mp_bcast( emass_cutoff,         ionode_id, intra_image_comm )
        CALL mp_bcast( orthogonalization,    ionode_id, intra_image_comm )
