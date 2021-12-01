@@ -76,7 +76,7 @@ SUBROUTINE setlocal
       vj = vj+2*cos(phi+dot_product(gj,rvec))
     enddo gj_loop
     vltot(ir) = vm*vj
-    write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
+    !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo r_loop
   v_of_0 = sum(vltot)/dfftp%nnr
   call mp_sum(v_of_0, intra_bgrp_comm)
