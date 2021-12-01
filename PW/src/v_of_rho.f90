@@ -517,7 +517,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   USE fft_interfaces,    ONLY : invfft
   USE gvect,             ONLY : ngm, gg, gstart, g
   USE lsda_mod,          ONLY : nspin
-  USE cell_base,         ONLY : omega, tpiba2, tpiba, at
+  USE cell_base,         ONLY : omega, tpiba2, tpiba, at, alat
   USE control_flags,     ONLY : gamma_only
   USE mp_bands,          ONLY : intra_bgrp_comm
   USE mp,                ONLY : mp_sum
@@ -599,7 +599,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
      ENDIF
      !
      if (lmoire) then
-     fac = e2 * tpi / tpiba / (epsmoire*amoire) * at(3, 3)
+     fac = e2 * tpi / tpiba / (epsmoire*amoire) * at(3, 3)*alat
      else
      fac = e2 * fpi / tpiba2
      endif ! lmoire

@@ -719,7 +719,7 @@ MODULE exx_base
     !! It then regularizes it according to the specified recipe.
     !
     USE kinds,      ONLY : DP
-    USE cell_base,  ONLY : tpiba, at, tpiba2
+    USE cell_base,  ONLY : tpiba, at, tpiba2, alat
     USE constants,  ONLY : fpi, e2, pi, tpi, eps8
     USE constants,  ONLY : BOHR_RADIUS_ANGS
     USE input_parameters, ONLY : lmoire, epsmoire, amoire_in_ang
@@ -817,7 +817,7 @@ MODULE exx_base
          ELSE
             if (lmoire) then
             if (abs(g(3,ig)) > eps8) cycle
-            fac(ig) = e2*tpi/( sqrt(qq) + yukawa )/(epsmoire*amoire)*at(3,3) * grid_factor_track(ig)
+            fac(ig) = e2*tpi/( sqrt(qq) + yukawa )/(epsmoire*amoire)*at(3,3)*alat * grid_factor_track(ig)
             else
             fac(ig) = e2*fpi/( qq + yukawa ) * grid_factor_track(ig) ! as HARTREE
             endif ! lmoire
