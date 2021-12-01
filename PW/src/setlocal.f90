@@ -19,7 +19,7 @@ SUBROUTINE setlocal
   USE kinds,             ONLY : DP
   USE constants,         ONLY : eps8, pi, AUTOEV, e2
   USE ions_base,         ONLY : zv, ntyp => nsp, nat, tau
-  USE cell_base,         ONLY : omega, at, bg
+  USE cell_base,         ONLY : omega, at, alat
   USE extfield,          ONLY : tefield, dipfield, etotefield, gate, &
                                 etotgatefield !TB
   USE gvect,             ONLY : igtongl, gg
@@ -68,7 +68,7 @@ SUBROUTINE setlocal
     rfrac(2) = DBLE(j)/DBLE(dfftp%nr2)
     rfrac(3) = DBLE(k)/DBLE(dfftp%nr3)
     !
-    rvec = matmul(at, rfrac)
+    rvec = matmul(alat*at, rfrac)
     ! loop over hex_shell
     vj = 0.d0
     gj_loop: do jg=1,3
@@ -76,7 +76,7 @@ SUBROUTINE setlocal
       vj = vj+2*cos(phi+dot_product(gj,rvec))
     enddo gj_loop
     vltot(ir) = vm*vj
-    !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
+    write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo r_loop
   v_of_0 = sum(vltot)/dfftp%nnr
   call mp_sum(v_of_0, intra_bgrp_comm)
@@ -162,19 +162,38 @@ SUBROUTINE setlocal
 END SUBROUTINE setlocal
 
 subroutine hex_shell(g6_out)
-  USE constants,         ONLY : eps8, pi
+  USE constants,         ONLY : eps8, pi, tpi
   USE cell_base,         ONLY : bg, tpiba
   implicit none
   double precision, intent(out) :: g6_out(3,6)
   double precision :: g1(3), g6(3,6), angles(6), bmag
+  double precision :: raxes(2,2), axes(2,2), tmat(2,2)
   integer iangs(6), ih, ib1, ib2
   g6_out(:,:) = 0.d0
-  bmag = tpiba * 2.d0/3.d0**0.5 ! first shell
+
+  ! hard-code ibrav=4 with alat=1
+  raxes(1,1) = 1.d0
+  raxes(2,1) = 1.d0/sqrt(3.d0)
+  raxes(1,2) = 0.d0
+  raxes(2,2) = 2.d0/sqrt(3.d0)
+  raxes(:,:) = tpi*raxes(:,:)
+  bmag = raxes(2, 2)
+  ! check that raxes is related to bg by an integer tile matrix
+  tmat = transpose(matmul(matinv2(tpiba*bg(1:2,1:2)), raxes))
+  do ib1=1,2
+  do ib2=1,2
+    if (abs(tmat(ib1,ib2)-nint(tmat(ib1,ib2))) > eps8) then
+      call errore('hex_shell', 'supercell is not tiled from ibrav=4 alat=1')
+    endif
+  enddo
+  enddo
+
   ! sort first shell of neighbors counter-clockwise from 9 o'clock (iangs)
   ih = 1
+  g1(3) = 0.d0
   do ib1 = -1,1
   do ib2 = -1,1
-    g1 = ib1*bg(:, 1)*tpiba + ib2*bg(:, 2)*tpiba
+    g1(1:2) = ib1*raxes(:,1) + ib2*raxes(:,2)
     if (abs(g1(3)) > eps8) call errore('hex_shell', 'z component', 1)
     if (abs(norm2(g1)-bmag) < eps8) then
       if (ih > 6) call errore('hex_shell', 'more than 6 k points in first shell', 1)
@@ -188,6 +207,24 @@ subroutine hex_shell(g6_out)
   do ih=1,6
     g6_out(:,ih) = g6(:,iangs(ih))
   enddo
+
+contains
+pure function matinv2(A) result(B)
+  !! Performs a direct calculation of the inverse of a 2×2 matrix.
+  implicit none
+  double precision, intent(in)  :: A(2,2) !! Matrix
+  double precision :: B(2,2) !! Inverse matrix
+  double precision :: detinv
+
+  ! Calculate the inverse determinant of the matrix
+  detinv = 1/(A(1,1)*A(2,2) - A(1,2)*A(2,1))
+
+  ! Calculate the inverse of the matrix
+  B(1,1) = +detinv * A(2,2)
+  B(2,1) = -detinv * A(2,1)
+  B(1,2) = -detinv * A(1,2)
+  B(2,2) = +detinv * A(1,1)
+end function
 end subroutine hex_shell
 
 subroutine merge_argsort(nr, r, d)
