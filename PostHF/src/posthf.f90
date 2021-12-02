@@ -20,6 +20,7 @@ PROGRAM posthf
   USE mp_world,   ONLY : world_comm, nproc
   USE environment,ONLY : environment_start, environment_end
   USE klist, ONLY: qnorm,nks,xk
+  USE input_parameters,  ONLY : lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire
   USE KINDS, ONLY : DP
   !
   IMPLICIT NONE
@@ -38,7 +39,8 @@ PROGRAM posthf
   NAMELIST / inputpp / prefix, outdir, write_psir, expand_kp, debug, & 
             ndet, ncholmax,thresh, number_of_orbitals,eigcut_occ, eigcut, out_prefix, verbose, & 
             h5_add_orbs, nskipvir,low_memory, get_hf,get_mp2,use_symm, &
-            regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment
+            regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment, &
+            lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire
 #ifdef __MPI
   CALL mp_startup ( )
 #endif
@@ -120,6 +122,12 @@ PROGRAM posthf
   CALL mp_bcast(exxdiv_treatment, ionode_id, world_comm ) 
   CALL mp_bcast(regp, ionode_id, world_comm ) 
   CALL mp_bcast(regkappa, ionode_id, world_comm ) 
+  CALL mp_bcast(lmoire, ionode_id, world_comm)
+  CALL mp_bcast(amoire_in_ang, ionode_id, world_comm)
+  CALL mp_bcast(vmoire_in_mev, ionode_id, world_comm)
+  CALL mp_bcast(pmoire_in_deg, ionode_id, world_comm)
+  CALL mp_bcast(mstar, ionode_id, world_comm)
+  CALL mp_bcast(epsmoire, ionode_id, world_comm)
   !
   ! MAM: Problematic situation, I need to modify qnorm before init_us_1 is 
   !      called in read_file, but to modify qnorm accurately I need to know
