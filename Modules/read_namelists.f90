@@ -843,6 +843,12 @@ MODULE read_namelists_module
        CALL mp_bcast( qcutz,             ionode_id, intra_image_comm )
        CALL mp_bcast( q2sigma,           ionode_id, intra_image_comm )
        CALL mp_bcast( input_dft,         ionode_id, intra_image_comm )
+       CALL mp_bcast( lmoire,            ionode_id, intra_image_comm )
+       CALL mp_bcast( amoire_in_ang,     ionode_id, intra_image_comm )
+       CALL mp_bcast( vmoire_in_mev,     ionode_id, intra_image_comm )
+       CALL mp_bcast( pmoire_in_deg,     ionode_id, intra_image_comm )
+       CALL mp_bcast( mstar,             ionode_id, intra_image_comm )
+       CALL mp_bcast( epsmoire,          ionode_id, intra_image_comm )
 
        ! ... EXX
 
@@ -985,6 +991,7 @@ MODULE read_namelists_module
        !
        IMPLICIT NONE
        !
+       CALL mp_bcast( extra_cycle,          ionode_id, intra_image_comm )
        CALL mp_bcast( emass,                ionode_id, intra_image_comm )
        CALL mp_bcast( emass_cutoff,         ionode_id, intra_image_comm )
        CALL mp_bcast( orthogonalization,    ionode_id, intra_image_comm )

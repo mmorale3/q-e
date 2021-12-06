@@ -32,6 +32,7 @@ MODULE input_parameters
   USE parameters, ONLY : nsx, natx, sc_size
   USE wannier_new,ONLY : wannier_data
   USE upf_params, ONLY : lqmax
+  USE constants,  ONLY : BOHR_RADIUS_ANGS
   !
   IMPLICIT NONE
   !
@@ -630,7 +631,25 @@ MODULE input_parameters
         !! in rhombohedral axes. If FALSE in hexagonal axes, that are
         !! converted internally in rhombohedral axes.  
         !
-
+        LOGICAL :: lmoire = .false.
+        !! Use 2D moire potential
+        !
+        ! the following are the needed parameters for 2D moire potential
+        REAL(DP) :: amoire_in_ang = BOHR_RADIUS_ANGS
+        !! moire lattice constant in Angstrom
+        !
+        REAL(DP) :: vmoire_in_mev = 0.d0
+        !! moire potential depth in meV
+        !
+        REAL(DP) :: pmoire_in_deg = 60.d0
+        !! moire potential "shape" in degrees
+        !
+        REAL(DP) :: epsmoire = 1.d0
+        !! moire in-plane dielectric constant
+        !
+        REAL(DP) :: mstar = 1.d0
+        !! effective mass of electrons in lowest band
+        !
 
 
         NAMELIST / system / ibrav, celldm, a, b, c, cosab, cosac, cosbc, nat, &
@@ -665,7 +684,9 @@ MODULE input_parameters
              lgcscf, gcscf_ignore_mun, gcscf_mu, gcscf_conv_thr,              &
              gcscf_gk, gcscf_gh, gcscf_beta,                                  &
              space_group, uniqueb, origin_choice, rhombohedral,               &
-             zgate, relaxz, block, block_1, block_2, block_height
+             zgate, relaxz, block, block_1, block_2, block_height,            &
+             lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar,      &
+             epsmoire
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters
@@ -1003,6 +1024,10 @@ MODULE input_parameters
         !! Time step for CP-BO electron minimization dynamics, in atomic units.
         !! CP: \(1 \text{a.u. of time} = 2.4189\cdot 10^{-17} s\), PW: twice that much.
 
+        LOGICAL :: extra_cycle = .false.
+        !! one more electrons_scf after exx convergence for energy components
+        !
+
         NAMELIST / electrons / emass, emass_cutoff, orthogonalization, &
           electron_maxstep, scf_must_converge, ortho_eps, ortho_max, electron_dynamics,   &
           electron_damping, electron_velocities, electron_temperature, &
@@ -1023,7 +1048,7 @@ MODULE input_parameters
           occupation_constraints, niter_cg_restart,                    &
           niter_cold_restart, lambda_cold, efield_cart, real_space,    &
           tcpbo,emass_emin, emass_cutoff_emin, electron_damping_emin,  &
-          dt_emin, efield_phase
+          dt_emin, efield_phase, extra_cycle
 
 !
 !=----------------------------------------------------------------------------=!

@@ -17,9 +17,9 @@ SUBROUTINE setlocal
   !
   USE io_global,         ONLY : stdout
   USE kinds,             ONLY : DP
-  USE constants,         ONLY : eps8
-  USE ions_base,         ONLY : zv, ntyp => nsp
-  USE cell_base,         ONLY : omega
+  USE constants,         ONLY : eps8, pi, AUTOEV, e2
+  USE ions_base,         ONLY : zv, ntyp => nsp, nat, tau
+  USE cell_base,         ONLY : omega, at, alat
   USE extfield,          ONLY : tefield, dipfield, etotefield, gate, &
                                 etotgatefield !TB
   USE gvect,             ONLY : igtongl, gg
@@ -27,6 +27,7 @@ SUBROUTINE setlocal
   USE vlocal,            ONLY : strf, vloc
   USE fft_base,          ONLY : dfftp
   USE fft_interfaces,    ONLY : invfft
+  USE fft_types,         ONLY : fft_index_to_3d
   USE gvect,             ONLY : ngm
   USE control_flags,     ONLY : gamma_only
   USE mp_bands,          ONLY : intra_bgrp_comm
@@ -35,6 +36,7 @@ SUBROUTINE setlocal
   USE esm,               ONLY : esm_local, esm_bc, do_comp_esm
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
+  USE input_parameters,  ONLY : lmoire, vmoire_in_mev, pmoire_in_deg
   !
   IMPLICIT NONE
   !
@@ -44,9 +46,44 @@ SUBROUTINE setlocal
   ! counter on atom types
   ! counter on g vectors
   !
+  double precision :: rfrac(3), rvec(3), gj(3), vm, phi, g6(3,6), vj
+  integer :: ir, i, j, k, jg, iat
+  logical :: offrange
+  !
+  if (lmoire) then
+  vltot(:) = 0.d0
+  vm = vmoire_in_mev*1e-3/AUTOEV*e2  ! e2 converts Ha to Ry
+  phi = pmoire_in_deg/180.d0*pi
+  call hex_shell(g6)
+  write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
+  do iat=1,6
+    write(stdout, '("     ",3f11.6)') matmul(transpose(at), g6(:,iat))/(2.d0*pi)
+  enddo
+  r_loop: do ir = 1, dfftp%nnr
+    call fft_index_to_3d(ir, dfftp, i,j,k, offrange)
+    if ( offrange ) cycle
+    if ( k .ne. 0 ) cycle
+    !
+    rfrac(1) = DBLE(i)/DBLE(dfftp%nr1)
+    rfrac(2) = DBLE(j)/DBLE(dfftp%nr2)
+    rfrac(3) = DBLE(k)/DBLE(dfftp%nr3)
+    !
+    rvec = matmul(alat*at, rfrac)
+    ! loop over hex_shell
+    vj = 0.d0
+    gj_loop: do jg=1,3
+      gj = g6(:,2*jg)
+      vj = vj+2*cos(phi+dot_product(gj,rvec))
+    enddo gj_loop
+    vltot(ir) = vm*vj
+    !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
+  enddo r_loop
+  v_of_0 = sum(vltot)/dfftp%nnr
+  call mp_sum(v_of_0, intra_bgrp_comm)
+  write(stdout, '("     Moire V(G=0): ", f11.6, " meV")') v_of_0*AUTOEV*1e3
+  else ! not lmoire
   ALLOCATE( aux(dfftp%nnr) )
   aux(:) = (0.d0,0.d0)
-  !
   IF (do_comp_mt) THEN
      ALLOCATE( v_corr(ngm) )
      CALL wg_corr_loc( omega, ntyp, ngm, zv, strf, v_corr )
@@ -97,6 +134,9 @@ SUBROUTINE setlocal
   !
   vltot(:) =  DBLE( aux(:) )
   !
+  DEALLOCATE( aux )
+  endif ! lmoire
+  !
   ! ... If required add an electric field to the local potential 
   !
   IF ( tefield .AND. ( .NOT. dipfield ) )  &
@@ -116,10 +156,125 @@ SUBROUTINE setlocal
   !
   CALL plugin_init_potential( vltot )
   !
-  DEALLOCATE( aux )
-  !
   !
   RETURN
   !
 END SUBROUTINE setlocal
 
+subroutine hex_shell(g6_out)
+  USE constants,         ONLY : eps8, pi, tpi
+  USE cell_base,         ONLY : bg, tpiba
+  implicit none
+  double precision, intent(out) :: g6_out(3,6)
+  double precision :: g1(3), g6(3,6), angles(6), bmag
+  double precision :: raxes(2,2), axes(2,2), tmat(2,2)
+  integer iangs(6), ih, ib1, ib2
+  g6_out(:,:) = 0.d0
+
+  ! hard-code ibrav=4 with alat=1
+  raxes(1,1) = 1.d0
+  raxes(2,1) = 1.d0/sqrt(3.d0)
+  raxes(1,2) = 0.d0
+  raxes(2,2) = 2.d0/sqrt(3.d0)
+  raxes(:,:) = tpi*raxes(:,:)
+  bmag = raxes(2, 2)
+  ! check that raxes is related to bg by an integer tile matrix
+  tmat = transpose(matmul(matinv2(tpiba*bg(1:2,1:2)), raxes))
+  do ib1=1,2
+  do ib2=1,2
+    if (abs(tmat(ib1,ib2)-nint(tmat(ib1,ib2))) > eps8) then
+      call errore('hex_shell', 'supercell is not tiled from ibrav=4 alat=1')
+    endif
+  enddo
+  enddo
+
+  ! sort first shell of neighbors counter-clockwise from 9 o'clock (iangs)
+  ih = 1
+  g1(3) = 0.d0
+  do ib1 = -1,1
+  do ib2 = -1,1
+    g1(1:2) = ib1*raxes(:,1) + ib2*raxes(:,2)
+    if (abs(g1(3)) > eps8) call errore('hex_shell', 'z component', 1)
+    if (abs(norm2(g1)-bmag) < eps8) then
+      if (ih > 6) call errore('hex_shell', 'more than 6 k points in first shell', 1)
+      g6(:,ih) = g1
+      angles(ih) = atan2(g1(2), g1(1))
+      ih = ih+1
+    endif
+  enddo
+  enddo
+  call merge_argsort(6, angles, iangs)
+  do ih=1,6
+    g6_out(:,ih) = g6(:,iangs(ih))
+  enddo
+
+contains
+pure function matinv2(A) result(B)
+  !! Performs a direct calculation of the inverse of a 2×2 matrix.
+  implicit none
+  double precision, intent(in)  :: A(2,2) !! Matrix
+  double precision :: B(2,2) !! Inverse matrix
+  double precision :: detinv
+
+  ! Calculate the inverse determinant of the matrix
+  detinv = 1/(A(1,1)*A(2,2) - A(1,2)*A(2,1))
+
+  ! Calculate the inverse of the matrix
+  B(1,1) = +detinv * A(2,2)
+  B(2,1) = -detinv * A(2,1)
+  B(1,2) = -detinv * A(1,2)
+  B(2,2) = +detinv * A(1,1)
+end function
+end subroutine hex_shell
+
+subroutine merge_argsort(nr, r, d)
+  implicit none
+  integer, intent(in) :: nr
+  real(kind=8), intent(in), dimension(nr) :: r
+  integer, intent(out), dimension(nr) :: d
+  
+  integer, dimension(nr) :: il
+
+  integer :: stepsize
+  integer :: i,j,left,k,ksize
+  
+  do i=1,nr
+    d(i)=i
+  end do
+  
+  if ( nr==1 ) return
+  
+  stepsize = 1
+  do while (stepsize<nr)
+    do left=1,nr-stepsize,stepsize*2
+      i = left
+      j = left+stepsize
+      ksize = min(stepsize*2,nr-left+1)
+      k=1
+  
+      do while ( i<left+stepsize .and. j<left+ksize )
+        if ( r(d(i))>r(d(j)) ) then
+          il(k)=d(i)
+          i=i+1
+          k=k+1
+        else
+          il(k)=d(j)
+          j=j+1
+          k=k+1
+        endif
+      enddo
+  
+      if ( i<left+stepsize ) then
+        ! fill up remaining from left
+        il(k:ksize) = d(i:left+stepsize-1)
+      else
+        ! fill up remaining from right
+        il(k:ksize) = d(j:left+ksize-1)
+      endif
+      d(left:left+ksize-1) = il(1:ksize)
+    end do
+    stepsize=stepsize*2
+  end do
+
+  return
+end subroutine merge_argsort

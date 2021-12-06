@@ -4398,6 +4398,7 @@ end associate
     USE mp_bands,          ONLY : intra_bgrp_comm, me_bgrp, nproc_bgrp
     USE exx_base,          ONLY : nqs, xkq_collect, index_xkq, index_xk, &
                                   g2_convolution
+    USE input_parameters,  ONLY : lmoire
     !
     IMPLICIT NONE
     !
@@ -4469,6 +4470,7 @@ end associate
            ENDDO  
            !
            CALL invfft( 'Rho', vc, dfftt )
+           if (lmoire) vc(:) = vc(:) * dfftt%nr3x
            !
            DO ir = 1, NQR   
              RESULT(ir,ibnd) = RESULT(ir,ibnd) + locbuff(ir,ibnd,ikq) * vc(ir)   
@@ -4500,6 +4502,7 @@ end associate
              ENDDO
              !
              CALL invfft( 'Rho', vc, dfftt )
+             if (lmoire) vc(:) = vc(:) * dfftt%nr3x
              !
              DO ir = 1, NQR   
                RESULT(ir,kbnd) = RESULT(ir,kbnd) + x_occupation(ibnd,ikq) * locbuff(ir,ibnd,ikq) * vc(ir)   
