@@ -62,6 +62,7 @@ MODULE posthf_mod
     USE noncollin_module,     ONLY : noncolin, npol
     USE exx_base, ONLY: nq1,nq2,nq3, &  
             x_gamma_extrapolation, exx_divergence
+    USE input_parameters, ONLY: lmoire
     !
     IMPLICIT NONE
     !
@@ -141,8 +142,12 @@ MODULE posthf_mod
     write(*,*) 'nelec,nup,ndown:',nelec_tot,nup,ndown
     !
     efc = 0.d0
+    if (lmoire) then
+    e0 = 0.d0
+    else
     e0 = e2Ha * ewald( alat, nat, nsp, ityp, zv, at, bg, tau, &
                 omega, g, gg, ngm, gcutm, gstart, gamma_only, strf )
+    endif
     !
 !    allocate( norbK(nksym) )
 !    norbK(1:nksym) = norb   ! by default set to norb

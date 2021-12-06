@@ -44,6 +44,8 @@ MODULE onebody_hamiltonian
                         igksym, ngksym,e2Ha, nmax_DM, DM, DM_mf
     USE orbital_generators, ONLY: mixed_basis
     USE read_orbitals_from_file, ONLY: h5file_type
+    USE constants, ONLY: BOHR_RADIUS_ANGS
+    USE input_parameters, ONLY: lmoire, amoire_in_ang, mstar
     !
     IMPLICIT NONE
     !
@@ -55,7 +57,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP) :: ctemp
     INTEGER :: ia, ib, i0, no, error, npw,npw2
     INTEGER :: ik,ibnd, ikk, ispin
-    REAL(DP) :: fac
+    REAL(DP) :: fac, amoire, wm
     COMPLEX(DP) :: CONE, CZERO, CNORM
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
@@ -63,6 +65,12 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     !
+    if (lmoire) then
+      amoire = amoire_in_ang/BOHR_RADIUS_ANGS
+      wm = 1.d0/(mstar*amoire**2)
+    else ! default band width
+      wm = 1.d0
+    endif
 
     CONE = (1.d0,0.d0)
     CZERO = (0.d0,0.d0)
@@ -111,8 +119,8 @@ MODULE onebody_hamiltonian
       !
       hpsi(:,:) = (0.d0,0.d0)  
       DO ibnd = 1, h5id_orbs%norbK(ik)
-        hpsi (1:npw, ibnd) = tpiba2 * g2kin (1:npw) * Orbitals(1:npw,ibnd) 
-        if(noncolin) hpsi (npwx+1:npwx+npw, ibnd+h5id_orbs%norbK(ik)) = tpiba2 * &
+        hpsi (1:npw, ibnd) = wm*tpiba2 * g2kin (1:npw) * Orbitals(1:npw,ibnd) 
+        if(noncolin) hpsi (npwx+1:npwx+npw, ibnd+h5id_orbs%norbK(ik)) = wm*tpiba2 * &
                                                 g2kin (1:npw) * Orbitals(1:npw,ibnd)
       END DO
       !
