@@ -468,9 +468,160 @@ subroutine pyscf_driver_mp2(out_prefix_,diag,diag_type,nread_from_h5, &
   !
 end subroutine pyscf_driver_mp2
 
+! MAM: This routine right now forces diagonalization, to generate a file with
+! the correct structure. If you want to allow calculations directly on the QE
+! basis, generate a pass through that skips the first step and simply writes the
+! qeorbs in the correct h5 format. Then call rpa routine.
+subroutine pyscf_driver_rpa(out_prefix_,diag_type,nread_from_h5, &
+                         h5_add_orbs_,eigcut,nextracut,thresh, ncholmax,erpa)
+  !
+!  USE posthf_mod, ONLY: 
+  USE KINDS, ONLY: DP
+  USE io_files,  ONLY : tmp_dir 
+  USE io_global, ONLY : stdout
+  USE mp_global, ONLY : nimage, nproc_image, me_image, root_image, &
+                        intra_image_comm 
+  USE mp, ONLY: mp_barrier, mp_bcast 
+  USE mp_pools, ONLY: npool 
+  USE orbital_generators, ONLY: generate_orbitals,write_trial_wavefunction, &
+                                diag_hf, davcio_to_esh5, generate_full_pw_basis
+  USE onebody_hamiltonian, ONLY: getH1
+  USE twobody_hamiltonian, ONLY: cholesky_r, cholesky_MO
+  USE lsda_mod, ONLY: nspin
+  USE wvfct, ONLY: nbnd, wg
+  USE klist,  ONLY : wk
+  use fft_base,             ONLY : dffts
+  USE read_orbitals_from_file, ONLY: open_esh5_read,close_esh5_read,h5file_type 
+  USE posthf_mod, ONLY: norb,nksym,nmax_DM,DM,DM_mf,e0, efc, numspin
+  USE rpa_module, ONLY: rpa_cholesky
+  !
+  IMPLICIT NONE
+  !
+  CHARACTER(len=*), INTENT(IN) :: h5_add_orbs_,diag_type,out_prefix_
+  REAL(kind=8), INTENT(IN) :: eigcut, nextracut, thresh, ncholmax
+  INTEGER, INTENT(IN) :: nread_from_h5 
+  REAL(kind=8), INTENT(OUT) :: erpa
+  !
+  REAL(DP) :: occeigcut
+  LOGICAL :: diagonalize  
+  INTEGER :: h5len, oldh5  
+  CHARACTER(len=256) :: out_prefix, h5_add_orbs, h5qeorbs
+  CHARACTER(len=256) :: hamilFile,orbsFile,canOrbsFile
+  COMPLEX(DP) :: energy
+  TYPE(h5file_type) :: h5id_hamil,h5id_orbs
+  INTEGER :: maxnorb, nelmax, error, ndet, nel(2)
+  INTEGER, ALLOCATABLE :: noccK(:,:)
+  REAL(DP), ALLOCATABLE :: weights(:,:), eigval(:,:)
+  COMPLEX(DP), ALLOCATABLE :: M(:,:,:,:)  ! Overlap between basis states and
+                                            ! occupied KS states.    
+  ndet=1
+  occeigcut=1.d-8
+  !
+  out_prefix = TRIM(out_prefix_) 
+  h5_add_orbs = TRIM(h5_add_orbs_)
+  hamilFile = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.MOCholesky.h5'
+  orbsFile = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.orbitals.h5'
+  canOrbsFile = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.canonical.orbitals.h5'
+  h5qeorbs = TRIM( tmp_dir )//TRIM( out_prefix ) // '.qe.orbs.h5'
+  !
+  !
+  diagonalize = .true. 
+  if( (TRIM(diag_type) == 'fullpw') .or. (nread_from_h5 > 0 ) ) & 
+    diagonalize = .true.
+!      all orbitals are accessible through davcio
+  if( (TRIM(diag_type) == 'fullpw') .or. &
+      (npool > 1) ) call davcio_to_esh5(h5qeorbs,norb,dffts)
+  !  
+  if(me_image == root_image) then
+    !
+    ! 1. generate orbitals
+    !
+    write(*,*) 'Generating orbitals' 
+    if( TRIM(diag_type) == 'fullpw' ) then
+      CALL generate_full_pw_basis(out_prefix,dffts)  
+    else if(npool > 1) then
+      CALL generate_orbitals(out_prefix,dffts,nread_from_h5,h5_add_orbs, &
+            eigcut,occeigcut,nextracut,.false.,esh5_orbs=h5qeorbs)
+    else
+      CALL generate_orbitals(out_prefix,dffts,nread_from_h5,h5_add_orbs, &
+            eigcut,occeigcut,nextracut,.false.)
+    endif
+    !
+    ! 2. diagonalize HF is requested
+    !
+    if(diagonalize) then
+      h5len = LEN_TRIM(hamilFile)
+      oldh5=0
+      CALL esh5_posthf_open_file(h5id_hamil%id,hamilFile,h5len,oldh5)
+      ! all tasks open orbital file in read_only mode
+      call open_esh5_read(h5id_orbs,orbsFile)
+      if( h5id_orbs%grid_type .ne. 1) &
+        call errore('pyscf_driver','grid_type ne 1',1)
+
+      ! mp2 now requires Overlap matrix between basis and KS/HF states
+      call get_nelmax(nbnd,nksym,numspin,wk,size(wg,1),wg,nelmax)
+      maxnorb = maxval(h5id_orbs%norbK(:))
+      call mp_bcast(nelmax, root_image, intra_image_comm)
+      write(*,*)'maxnorb, nelmax:',maxnorb, nelmax
+      allocate( M(maxnorb,nelmax,nksym,min(2,nspin)) )
+      if(npool > 1) then
+        call write_trial_wavefunction(h5id_orbs,h5id_hamil,&
+                    dffts,nelmax,M,ndet,0.05d0,0.95d0,h5wfn=h5qeorbs)
+      else
+        call write_trial_wavefunction(h5id_orbs,h5id_hamil,&
+                    dffts,nelmax,M,ndet,0.05d0,0.95d0)
+      endif
+
+      write(*,*) 'Generating 1-Body Hamiltonian'
+      CALL getH1(h5id_orbs,h5id_hamil,dffts)
+      CALL esh5_posthf_close_file(h5id_hamil%id)
+      call close_esh5_read(h5id_orbs)
+
+      h5len = LEN_TRIM(orbsFile)
+      oldh5 = 1
+      CALL esh5_posthf_open_file(h5id_hamil%id,TRIM(orbsFile),h5len,oldh5)
+      call esh5_posthf_write_orbmat(h5id_hamil%id,"SCFOrbMat",9, &
+            maxnorb,nelmax,nksym,size(M,4),M,error)
+      if(error .ne. 0 ) &
+        call errore('pyscf_driver::rpa_driver','error writing orbmat',1)
+      CALL esh5_posthf_close_file(h5id_hamil%id)
+      if(allocated(M)) deallocate(M)
+
+      call mp_barrier(intra_image_comm)  
+      write(*,*) ' Diagonalizing HF hamiltonian' 
+      ! orbitals are read from esh5 only right now
+      call diag_hf(dffts,'full',hamilFile,orbsFile,orbsFile,canOrbsFile,.true.)
+    endif
+  else
+    if(diagonalize) then  
+      call mp_bcast(nelmax, root_image, intra_image_comm)
+      call mp_barrier(intra_image_comm)  
+      ! orbitals are read from esh5 only right now
+      call diag_hf(dffts,'full',hamilFile,orbsFile,orbsFile,canOrbsFile,.true.)
+    endif
+  endif
+  call mp_barrier(intra_image_comm)  
+  !
+  if(diagonalize) orbsFile = canOrbsFile 
+  !
+  ! calculate cholesky matrix  
+! can use the resulting cholesky decomposition for the diaghf step  
+  call cholesky_MO(nelmax,ncholmax,thresh,dffts,hamilFile,orbsFile)
+  !
+  ! 3. calculate rpa 
+  !
+  write(*,*) ' Starting RPA' 
+  FLUSH( stdout )
+  call rpa_cholesky(energy,dffts,"mo",hamilFile,orbsFile)
+  erpa = real(dble(energy),kind=8)
+  !
+  call print_clock('')    
+  !
+end subroutine pyscf_driver_rpa
+
 subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
        ndet, eigcut, nextracut, thresh, ncholmax, &
-       get_hf, get_mp2, update_qe_bands, ehf, emp2)
+       get_hf, get_mp2, get_rpa, update_qe_bands, ehf, emp2, erpa)
   !
   USE mp_global, ONLY : nimage, nproc_image, me_image, root_image, &
                         intra_image_comm
@@ -488,6 +639,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   USE onebody_hamiltonian, ONLY: getH1
   USE twobody_hamiltonian, ONLY: cholesky_r, calculate_KS_bscorr
   USE mp2_module, ONLY: mp2_g,mp2no,approx_mp2no
+  USE rpa_module, ONLY: rpa_cholesky
 #if defined(__CUDA)
   USE mp2_module, ONLY: mp2_gpu
 #endif
@@ -499,9 +651,9 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   !
   CHARACTER(len=*), INTENT(IN) :: h5_add_orbs_,out_prefix_
   REAL(kind=8), INTENT(IN) :: eigcut, nextracut, thresh, ncholmax
-  LOGICAL, INTENT(IN) :: get_hf, get_mp2,update_qe_bands
+  LOGICAL, INTENT(IN) :: get_hf, get_mp2, get_rpa, update_qe_bands
   INTEGER, INTENT(IN) :: nread_from_h5, ndet
-  REAL(kind=8), INTENT(OUT) :: ehf, emp2
+  REAL(kind=8), INTENT(OUT) :: ehf, emp2, erpa
   !
   INTEGER :: h5len, oldh5, error
   INTEGER :: maxnorb, nelmax
@@ -509,7 +661,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
                                             ! occupied KS states. 
   CHARACTER(len=256) :: out_prefix, h5_add_orbs, h5qeorbs
   CHARACTER(len=256) :: hamilFile,orbsFile,canOrbsFile
-  COMPLEX(DP) :: e1, e1_so, e2_mp2, e1_mf, e1_so_mf
+  COMPLEX(DP) :: e1, e1_so, e2_mp2, e2_rpa, e1_mf, e1_so_mf
   TYPE(h5file_type) :: h5id_hamil,h5id_orbs
   REAL(DP) :: occeigcut  
 
@@ -524,6 +676,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   !
   ehf=0.d0
   emp2=0.d0  
+  erpa=0.d0  
   e1=(0.d0,0.d0) 
   e1_so=(0.d0,0.d0)  
   e1_mf=(0.d0,0.d0) 
@@ -606,10 +759,10 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   call cholesky_r(ncholmax,thresh,dffts,hamilFile,orbsFile)
 
   ! mp2 requires hf rediag
-  if(get_hf .or. get_mp2) then
+  if(get_hf .or. get_mp2 .or. get_rpa) then
     call mp_barrier(intra_image_comm)
     ! orbitals are read from esh5 only right now
-    call diag_hf(dffts,'full',hamilFile,orbsFile,orbsFile,canOrbsFile)
+    call diag_hf(dffts,'full',hamilFile,orbsFile,orbsFile,canOrbsFile,.true.)
   endif
 
   if(get_mp2) then
@@ -620,6 +773,14 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
     call mp2_g(e2_mp2,dffts,canOrbsFile)
 #endif
     emp2 = real(dble(e2_mp2),kind=8)
+  endif
+  call mp_barrier(intra_image_comm)
+  !
+
+  if(get_rpa) then
+    call mp_barrier(intra_image_comm)
+    call rpa_cholesky(e2_rpa,dffts,"full",hamilFile,canOrbsFile)
+    erpa = real(dble(e2_rpa),kind=8)
   endif
   call mp_barrier(intra_image_comm)
   !

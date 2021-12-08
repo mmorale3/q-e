@@ -1239,6 +1239,7 @@ MODULE orbital_generators
     INTEGER :: n,h5len,oldh5,error,i0,M,ispin,n0, n_spins
     INTEGER, ALLOCATABLE :: noccK(:,:) 
     COMPLEX(DP) :: ctemp
+    COMPLEX(DP), ALLOCATABLE :: FockMIO(:,:)  ! I/O version of FockM 
     COMPLEX(DP), ALLOCATABLE :: FockM(:,:)   ! Fock matrix
     COMPLEX(DP), ALLOCATABLE :: Orbs(:,:,:) ! old orbitals 
     COMPLEX(DP), ALLOCATABLE :: newOrbs(:,:) ! new orbitals 
@@ -1294,10 +1295,20 @@ MODULE orbital_generators
     endif
 
     allocate( FockM(h5id_input_orbs%norbK(1),h5id_input_orbs%norbK(1)) ) 
+    if(root_image == me_image) & 
+      allocate( FockMIO(h5id_input_orbs%maxnorb,h5id_input_orbs%maxnorb) )
     if(root_image == me_image) &
       allocate( newOrbs(npwx,h5id_input_orbs%maxnorb), &
                 eigval(h5id_input_orbs%maxnorb), &
                 Orbs(npwx, h5id_input_orbs%maxnorb, 1) )
+
+    if(root_image == me_image) then
+      call esh5_posthf_write_orbmat_info(h5id_output_orbs%id, 'CanOrbMat', 9,   &
+                 h5id_input_orbs%maxnorb,h5id_input_orbs%maxnorb,nksym,n_spins, &
+                 error)
+      if(error .ne. 0 ) &
+        call errore('diag_hf','error calling esh5_posthf_write_orbmat_info',1) 
+    endif
 
     do ik=1,nksym
 
@@ -1360,6 +1371,23 @@ MODULE orbital_generators
             FLUSH( stdout )
           endif
 
+          FockMIO(:,:) = (0.d0,0.d0)
+          FockMIO(1:h5id_input_orbs%norbK(ik),1:h5id_input_orbs%norbK(ik)) = &
+                FockM(1:h5id_input_orbs%norbK(ik),1:h5id_input_orbs%norbK(ik))
+          if( TRIM(dtype) .ne. 'full' ) then
+            ! make FockMIO block diagonal, with identity on occ/occ block 
+            FockMIO(1:i0-1,:)=(0.d0,0.d0)
+            FockMIO(:,1:i0-1)=(0.d0,0.d0)
+            do n=1,i0-1
+              FockMIO(n,n)=(1.d0,0.d0)
+            enddo
+          endif
+          call esh5_posthf_write_orbmat_single(h5id_output_orbs%id, 'CanOrbMat', 9, &
+                     size(FockMIO,1), size(FockMIO, 2), ik-1, ispin-1,  &
+                     FockMIO, error)
+          if(error .ne. 0 ) &
+            call errore('diag_hf','error writing CanOrbMat rotation matrix',1)
+
           if(rotate_basis_) then
 
             call get_orbitals_set(h5id_input_orbs,'esh5','psig',dfft,1,Orbs,&
@@ -1375,23 +1403,6 @@ MODULE orbital_generators
                        h5id_input_orbs%norbK(ik), newOrbs, npwx, error)
             if(error .ne. 0 ) &
               call errore('diag_hf','error writing rotated orbitals',1)
-
-          else
-
-            if( TRIM(dtype) .ne. 'full' ) then
-              ! make FockM block diagonal, with identity on occ/occ block 
-              FockM(1:i0,:)=(0.d0,0.d0)  
-              FockM(:,1:i0)=(0.d0,0.d0)  
-              do n=1,i0
-                FockM(n,n)=(1.d0,0.d0)  
-              enddo  
-            endif
-
-            call esh5_posthf_write(h5id_output_orbs%id, 'CanOrbMat', 9, ikk-1, &
-                       h5id_input_orbs%norbK(ik), h5id_input_orbs%norbK(ik), &
-                       FockM, h5id_input_orbs%norbK(ik), error)
-            if(error .ne. 0 ) &
-              call errore('diag_hf','error writing CanOrbMat rotation matrix',1)
 
           endif
 
@@ -1415,6 +1426,7 @@ MODULE orbital_generators
 
     if(allocated(noccK)) deallocate(noccK)
     if(allocated(FockM)) deallocate(FockM)
+    if(allocated(FockMIO)) deallocate(FockMIO)
     if(allocated(eigval)) deallocate(eigval)
     if(allocated(weights)) deallocate(weights)
     if(allocated(Orbs)) deallocate(Orbs)

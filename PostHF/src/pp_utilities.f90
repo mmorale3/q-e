@@ -411,6 +411,7 @@ END SUBROUTINE calculate_phase_factor
 
   END SUBROUTINE eigsysD
   !
+  !-----------------------------------------------------------------------
   SUBROUTINE zmatinv (n, a, lda)
   !-----------------------------------------------------------------------
   !
@@ -437,6 +438,7 @@ END SUBROUTINE calculate_phase_factor
   DEALLOCATE ( work, ipiv )
   !
   END SUBROUTINE zmatinv
+  !-----------------------------------------------------------------------
   !
   SUBROUTINE find_2d_partition( N, rk, np, i0, i1, j0, j1)
     IMPLICIT NONE
@@ -1049,3 +1051,194 @@ SUBROUTINE get_nelmax(nbnd,nk,ns,wk,n1,wg,nelmax)
   enddo
 END SUBROUTINE get_nelmax
 !-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
+! Generates an N-point Gauss-Legendre grid (with scaling function f(x)=1)
+! Not efficient, but simple!
+!-----------------------------------------------------------------------
+SUBROUTINE gaussleg_quad(N,ix,iw)
+  !
+  USE KINDS, ONLY : DP
+  USE constants, ONLY: pi
+  !
+  IMPLICIT NONE 
+  INTEGER, INTENT(IN) :: N
+  REAL(DP), INTENT(OUT) :: ix(N), iw(N)
+  !
+  INTEGER :: i, cnt, N2
+  REAL(DP) :: x,x0,pn(2),dpnx
+  
+  N2 = N/2
+  if( MOD(N,2) == 1 ) N2=N2+1
+
+  do i = 1, N2
+    x0 = cos(pi*(i-0.25d0)/(N+0.5d0))
+    pn = LegPoly(N,x0)
+    dpnx = (x0*pn(1) - pn(2)) * (1.d0*N)/(x0*x0-1.d0)
+    x = x0 - pn(1)/dpnx
+    cnt=1
+    do while( abs(x-x0) > 1e-12 )
+      x0 = x 
+      pn = LegPoly(N,x0)
+      dpnx = (x0*pn(1) - pn(2)) * (1.d0*N)/(x0*x0-1.d0)
+      x = x0 - pn(1)/dpnx
+      cnt=cnt+1
+    end do
+    ix(i) = x 
+    iw(i) = 2.d0/((1.d0-x*x)*dpnx*dpnx)
+    ! using symmetry
+    if( i <= N/2 ) then
+      ix(N-i+1) = -1.d0*ix(i)
+      iw(N-i+1) = iw(i)
+    endif
+  end do
+!  do i = 1, N
+!    write(*,*) 'xi,wi: ',ix(i),iw(i)
+!  end do
+ 
+  CONTAINS 
+
+  ! could evaluate both Pn and Pn-1 simultaneously, but keeping it simple
+  FUNCTION LegPoly(n,x) result(y)
+  implicit none
+  INTEGER, INTENT(IN) :: n
+  REAL(DP), INTENT(IN) :: x
+  REAL(DP) :: y(2)
+  INTEGER :: i
+  REAL(DP) :: y1,y2  ! y(n), y(n-1)
+  !
+  if(n==0) then
+    y(1)=1.d0
+    y(2)=0.d0
+  elseif(n==1) then
+    y(1)=x
+    y(2)=1.d0
+  else
+    y1=x     
+    y2=1.d0
+    do i=2,n
+      y(1)= ( (2.d0*i-1.d0)*x*y1 - (1.d0*i-1.d0)*y2) / (1.d0*i)
+      y(2)= y1
+      y1=y(1)
+      y2=y(2)  
+    enddo
+  endif 
+  !
+  END FUNCTION LegPoly
+  !
+END SUBROUTINE gaussleg_quad
+
+SUBROUTINE gaussleg_quad2(N,ix,iw)
+  !
+  USE KINDS, ONLY : DP
+  USE constants, ONLY: pi
+  !
+  IMPLICIT NONE 
+  INTEGER, INTENT(IN) :: N
+  REAL(DP), INTENT(OUT) :: ix(N), iw(N)
+  !
+  INTEGER :: i, cnt, N2
+  REAL(DP) :: x,x0,pnx,pnx1,dpnx
+  
+  N2 = N/2
+  if( MOD(N,2) == 1 ) N2=N2+1
+
+  do i = 1, N2
+    x0 = cos(pi*(i-0.25d0)/(n+0.5d0))
+    pnx = Pn(N,x0)
+    pnx1 = Pn(N-1,x0)
+    dpnx = (x0*pnx - pnx1) * (1.d0*n)/(x0*x0-1.d0)
+    x = x0 - pnx/dpnx
+    cnt=1
+    do while( abs(x-x0) > 1e-12 )
+      x0 = x 
+      pnx = Pn(N,x0)
+      pnx1 = Pn(N-1,x0)
+      dpnx = (x0*pnx - pnx1) * (1.d0*n)/(x0*x0-1.d0)
+      x = x0 - pnx/dpnx
+      cnt=cnt+1
+    end do
+    ix(i) = x 
+    iw(i) = 2.d0/((1.d0-x*x)*dpnx*dpnx)
+    ! using symmetry
+    if( i <= N/2 ) then
+      ix(N-i+1) = -1.d0*ix(i)
+      iw(N-i+1) = iw(i)
+    endif
+  end do
+  do i = 1, N
+    write(*,*) 'xi,wi: ',ix(i),iw(i)
+  end do
+ 
+  CONTAINS 
+
+  ! could evaluate both Pn and Pn-1 simultaneously, but keeping it simple
+  RECURSIVE FUNCTION Pn(n,x) result(y)
+  implicit none
+  INTEGER, INTENT(IN) :: n
+  REAL(DP), INTENT(IN) :: x
+  REAL(DP) :: y
+  !
+  if(n==0) then
+    y=1.d0
+  elseif(n==1) then
+    y=x
+  else
+    y = ( (2.d0*n-1.d0)*x*Pn(n-1,x) - (1.d0*n-1.d0)*Pn(n-2,x)) / (1.d0*n)
+  endif 
+  !
+  END FUNCTION Pn
+  !
+END SUBROUTINE gaussleg_quad2
+!-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
+!  Transforms an N-point Gauss-Legendre integration grid from [-1:1] to [0:inf]
+!  Follows: X. Ren, et al.,  New Journal of Physics, Volume 14, 053020 (2012).
+!-----------------------------------------------------------------------
+  SUBROUTINE transform_gaussleg(N,x0,ix,iw)
+  !
+  USE KINDS, ONLY : DP
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT(IN) :: N
+  REAL(DP), INTENT(IN) :: x0
+  REAL(DP), INTENT(INOUT) :: ix(N), iw(N)
+  !
+  INTEGER :: i
+  REAL(DP) :: y
+  do i=1,N
+    y = 1.d0/(1.d0-ix(i))
+    iw(i) = 2.d0*x0*iw(i)*y*y
+    ix(i) = x0*(1.d0+ix(i))*y
+  enddo
+  !
+  END SUBROUTINE transform_gaussleg
+!-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
+! Test Gauss-Legendre integration on f(x) = a / (a*a + x*x) = pi/2  
+!-----------------------------------------------------------------------
+  SUBROUTINE test_gaussleg_grid(N,a,ix,iw)
+  !
+  USE KINDS, ONLY : DP
+  USE constants, ONLY: pi
+  !
+  implicit none
+  INTEGER, INTENT(IN) :: N
+  REAL(DP), INTENT(IN) :: a
+  REAL(DP), INTENT(IN) :: ix(N), iw(N)
+  !
+  INTEGER :: i
+  REAL(DP) :: err
+  !
+  err = 0.0d0
+  do i=1,N
+    err = err + iw(i) * a / (a*a + ix(i)*ix(i)) 
+  enddo
+  err = err - pi*0.5d0
+  write(*,*) ' Testing GL integration grid. N, a, error: ',N,a,err
+  !
+  END SUBROUTINE test_gaussleg_grid
+!-----------------------------------------------------------------------
+
