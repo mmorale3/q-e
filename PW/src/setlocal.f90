@@ -56,8 +56,13 @@ SUBROUTINE setlocal
   phi = pmoire_in_deg/180.d0*pi
   call hex_shell(g6)
   write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
+  write(stdout, *) "       cartesian:"
   do iat=1,6
-    write(stdout, '("     ",3f11.6)') matmul(transpose(at), g6(:,iat))/(2.d0*pi)
+    write(stdout, '("     ",3f11.6)') g6(:,iat)
+  enddo
+  write(stdout, *) "       supercell fractions:"
+  do iat=1,6
+    write(stdout, '("     ",3f11.6)') matmul(transpose(at), g6(:,iat))*alat/(2.d0*pi)
   enddo
   r_loop: do ir = 1, dfftp%nnr
     call fft_index_to_3d(ir, dfftp, i,j,k, offrange)
