@@ -51,7 +51,7 @@ SUBROUTINE electrons()
   !
   USE wvfct_gpum,           ONLY : using_et, using_wg, using_wg_d
   USE scf_gpum,             ONLY : using_vrs
-  USE input_parameters,     ONLY : extra_cycle
+  USE input_parameters,     ONLY : extra_cycle, write_exx_restart
   !
   IMPLICIT NONE
   !
@@ -309,6 +309,19 @@ SUBROUTINE electrons()
         IF ( dexx < tr2_final ) THEN
            IF ( do_makov_payne ) CALL makov_payne( etot )
            WRITE( stdout, 9101 )
+           if (write_exx_restart) then
+             CALL using_et(0)
+             CALL seqopn (iunres, 'restart_e', 'formatted', exst)
+             WRITE (iunres, *) iter, tr2, dexx
+             WRITE (iunres, *) exxen, fock0, fock1, fock2
+             ! FIXME: et and wg are written to xml file
+             WRITE (iunres, *) (wg(1:nbnd,ik),ik=1,nks)
+             WRITE (iunres, *) (et(1:nbnd,ik),ik=1,nks)
+             CLOSE (unit=iunres, status='keep')
+             CALL seqopn (iunres, 'restart_exx', 'unformatted', exst)
+             WRITE (iunres) exxbuff
+             CLOSE (unit=iunres, status='keep')
+           endif ! write_exx_restart
            RETURN
         ENDIF
         !
