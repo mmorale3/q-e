@@ -14,11 +14,12 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
   ! It then regularizes it according to the specified recipe
   !
   USE KINDS, ONLY : DP
-  USE constants, ONLY: tpi, fpi, e2
-  USE cell_base, ONLY: tpiba2, at, tpiba
+  USE constants, ONLY: tpi, fpi, e2, BOHR_RADIUS_ANGS, eps8
+  USE cell_base, ONLY: tpiba2, at, alat, tpiba
   USE coulomb_vcut_module,  ONLY: vcut_get,  vcut_spheric_get
   USE posthf_mod, ONLY:  use_coulomb_vcut_ws, use_coulomb_vcut_spheric, &
                 vcut, exxdiv
+  USE input_parameters, ONLY: lmoire, amoire_in_ang, epsmoire
   !
   IMPLICIT NONE
   !
@@ -34,7 +35,9 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
   REAL(DP) :: q(3), qq, x
   LOGICAL :: odg(3)
   REAL(DP)         :: eps_qdiv = 1.d-8 ! |q| > eps_qdiv
+  REAL(DP) :: amoire
   !
+  amoire = amoire_in_ang/BOHR_RADIUS_ANGS
   IF( use_coulomb_vcut_ws ) THEN
      DO ig = 1, ngm
         q(:)= ( xk(:) - xkq(:) + g(:,ig) ) * tpiba
@@ -63,7 +66,15 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
 !       ELSEIF( erf_scrlen > 0 ) THEN
 !          fac(ig)=e2*fpi/qq*(exp(-qq/4._DP/erf_scrlen**2)) * grid_factor_track(ig)
 !       ELSE
-        fac(ig)=e2*fpi/qq
+        if (lmoire) then
+          if (abs(g(3,ig)) > eps8) then
+            fac(ig) = 0.d0
+          else
+            fac(ig) = e2*tpi/sqrt(qq)/(epsmoire*amoire)*at(3,3)*alat
+          endif
+        else
+          fac(ig)=e2*fpi/qq
+        endif ! lmoire
 !       ENDIF
       !
     ELSE

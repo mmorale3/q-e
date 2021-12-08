@@ -2758,7 +2758,6 @@ MODULE twobody_hamiltonian
       CALL print_clock ( 'diag_fwfft' )
       CALL print_clock ( 'add_FockM' )
     endif
-
     !
   END SUBROUTINE add_FockM
 

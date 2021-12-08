@@ -51,7 +51,7 @@ SUBROUTINE electrons()
   !
   USE wvfct_gpum,           ONLY : using_et, using_wg, using_wg_d
   USE scf_gpum,             ONLY : using_vrs
-
+  USE input_parameters,     ONLY : extra_cycle
   !
   IMPLICIT NONE
   !
@@ -283,6 +283,13 @@ SUBROUTINE electrons()
         !
         IF ( dexx < tr2_final ) THEN
            WRITE( stdout, 9066 ) '!!', etot, hwf_energy
+           if (extra_cycle) then
+             printout = 2
+             call electrons_scf(printout, exxen)
+             write( stdout, 9069 ) (eband+deband-2*exxen)/2.d0
+             write( stdout, 9070 ) ehart/2.d0
+             write( stdout, 9071 ) exxen/2.d0
+           endif
         ELSE
            WRITE( stdout, 9066 ) '  ', etot, hwf_energy
         ENDIF
@@ -344,6 +351,9 @@ SUBROUTINE electrons()
             /'     Harris-Foulkes estimate   =',0PF17.8,' Ry' )
 9067 FORMAT('     est. exchange err (dexx)  =',0PF17.8,' Ry' )
 9068 FORMAT('     est. exchange err (dexx)  =',1PE17.1,' Ry' )
+9069 FORMAT( '    E1 (T+V)                   =',0PF17.8,' Ha/kpt' )
+9070 FORMAT( '    EJ (ehart)                 =',0PF17.8,' Ha/kpt' )
+9071 FORMAT( '    EX (exxen)                 =',0PF17.8,' Ha/kpt' )
 9101 FORMAT(/'     EXX self-consistency reached' )
 9120 FORMAT(/'     EXX convergence NOT achieved after ',i3,' iterations: stopping' )
 9121 FORMAT(/'     scf convergence threshold =',1PE17.1,' Ry' )
@@ -436,6 +446,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE wvfct_gpum,           ONLY : using_et
   USE scf_gpum,             ONLY : using_vrs
   USE device_fbuff_m,             ONLY : dev_buf, pin_buf
+  USE input_parameters,     ONLY : lmoire
   !
   IMPLICIT NONE
   !
@@ -515,12 +526,16 @@ SUBROUTINE electrons_scf ( printout, exxen )
   !
   ! ... calculates the ewald contribution to total energy
   !
+  if (lmoire) then
+   ewld = 0.d0
+  else
   IF ( do_comp_esm ) THEN
      ewld = esm_ewald()
   ELSE
      ewld = ewald( alat, nat, nsp, ityp, zv, at, bg, tau, &
                 omega, g, gg, ngm, gcutm, gstart, gamma_only, strf )
   ENDIF
+  endif ! lmoire
   !
   IF ( llondon ) THEN
      elondon = energy_london( alat , nat , ityp , at ,bg , tau )

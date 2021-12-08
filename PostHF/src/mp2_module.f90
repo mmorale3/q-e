@@ -625,7 +625,7 @@ MODULE mp2_module
      enddo ! ki
 
     enddo ! ispin
-
+    
     if(nspin==2) then
       emp2 = emp2*0.5d0
       eQ(:,:) = eQ(:,:)*0.50
@@ -648,6 +648,7 @@ MODULE mp2_module
             eQ(iq,1)/wQ(iq),eQ(iq,2)/wQ(iq)
       enddo
       !
+      write(*,*)
       !
       CALL print_clock ( 'mp2_Kia' )
       CALL print_clock ( 'mp2_io' )
