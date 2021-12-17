@@ -1026,6 +1026,9 @@ MODULE input_parameters
 
         LOGICAL :: extra_cycle = .false.
         !! one more electrons_scf after exx convergence for energy components
+
+        LOGICAL :: write_exx_restart = .false.
+        !! force writing of restart_e file at EXX convergence
         !
 
         NAMELIST / electrons / emass, emass_cutoff, orthogonalization, &
@@ -1048,7 +1051,7 @@ MODULE input_parameters
           occupation_constraints, niter_cg_restart,                    &
           niter_cold_restart, lambda_cold, efield_cart, real_space,    &
           tcpbo,emass_emin, emass_cutoff_emin, electron_damping_emin,  &
-          dt_emin, efield_phase, extra_cycle
+          dt_emin, efield_phase, extra_cycle, write_exx_restart
 
 !
 !=----------------------------------------------------------------------------=!
