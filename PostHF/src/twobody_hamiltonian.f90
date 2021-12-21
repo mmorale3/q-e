@@ -13,7 +13,8 @@ MODULE twobody_hamiltonian
   USE cell_base, ONLY: omega, alat, tpiba, tpiba2, at, bg
   USE posthf_mod, ONLY: nksym,norb,numspin,e0,efc,e2Ha,&
                         nelec_tot,nup,ndown,ke_factorization,&
-                        xksym,igksym,ngksym,QKtoK2,kminus,Qpts,DM,DM_mf,nmax_DM
+                        xksym,igksym,ngksym,QKtoK2,kminus,Qpts,  &
+                        DM,DM_mf,nmax_DM,nQuniq,wQ,xQ
   USE read_orbitals_from_file, ONLY: get_psi_esh5,&
                     open_esh5_read,close_esh5_read,h5file_type
   USE wavefunctions, ONLY : evc, psic
@@ -990,7 +991,7 @@ MODULE twobody_hamiltonian
   !   -  A packed structure of the pair indexes is used, where the 2 sectors are
   !   packed contiguously 
   !
-  SUBROUTINE cholesky_MO(noccmax,ncmax,thresh,dfft,hamil_file,orb_file)
+  SUBROUTINE cholesky_MO(noccmax,ncmax,thresh,dfft,hamil_file,orb_file,Qsym_only)
     !
     USE control_flags,        ONLY : use_gpu
     !
@@ -1000,20 +1001,24 @@ MODULE twobody_hamiltonian
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
     CHARACTER(len=*), INTENT(IN) :: hamil_file,orb_file
     REAL(DP), INTENT(IN) :: ncmax, thresh
+    LOGICAL, OPTIONAL, INTENT(IN) :: Qsym_only
+    LOGICAL :: Qsym_only_
     !
+    Qsym_only_ = .true.
+    if(present(Qsym_only)) Qsym_only_=Qsym_only
 #if defined(__CUDA)
 !      if(use_gpu) then
 !        call 
 !      else
-        call cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file) 
+        call cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file,Qsym_only_) 
 !      endif
 #else
-      call cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file) 
+      call cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file,Qsym_only_) 
 #endif            
     !
   END SUBROUTINE cholesky_MO
   !
-  SUBROUTINE cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file)
+  SUBROUTINE cholesky_MO_cpu(noccmax,ncmax,thresh,dfft,hamil_file,orb_file,Qsym_only)
     USE parallel_include
     USE qeh5_base_module
     USE ions_base,          ONLY : nat, ityp, ntyp => nsp
@@ -1028,13 +1033,14 @@ MODULE twobody_hamiltonian
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
     CHARACTER(len=*), INTENT(IN) :: hamil_file,orb_file
     REAL(DP), INTENT(IN) :: ncmax, thresh
+    LOGICAL, INTENT(IN) :: Qsym_only
     !
     CHARACTER(len=256) :: h5name
     INTEGER :: n_spin, nchol_max, nchol, h5len, oldh5
     INTEGER :: Q, ka, kb, iab, ia, ib, iu, iv, ku, kv, ni, nj, iuv
     INTEGER :: i, ii,jj,kk, ia0, iu0, ispin, is1, is2, noa, nob
     INTEGER :: a_beg, a_end, b_beg, b_end, ab_beg, ab_end, nabpair   ! assigned orbitals/pairs
-    INTEGER :: naorb, nborb, iabmax,nkloc,k_beg,k_end 
+    INTEGER :: naorb, nborb, iabmax,nkloc,k_beg,k_end, iq, nQ 
     INTEGER :: maxv_rank,error,ibnd,ik,ikk,j, maxnorb, nabtot
     REAL(DP), ALLOCATABLE :: xkcart(:,:)
     REAL(DP) :: dQ(3),dQ1(3),dk(3), dG(3, 27)
@@ -1142,6 +1148,7 @@ MODULE twobody_hamiltonian
     allocate( phasefac(dfft%nnr,27) )
     allocate( maxres(nchol_max), comm(nproc_image*5) )
     allocate( ncholQ(nksym),  xkcart(3,nksym) )
+    ncholQ(:)=0
 
     ! fix with symmetry 
     do ik=1,nksym
@@ -1173,13 +1180,27 @@ MODULE twobody_hamiltonian
     pnorm = 1.d0 / (dfft%nr1*dfft%nr2*dfft%nr3*nksym) 
     eX = (0.d0,0.d0)
     eJ = (0.d0,0.d0)
-    do Q=1,nksym
+    
+    if(Qsym_only) then
+      nQ = nQuniq 
+    else
+      nQ = nksym 
+    endif
+    do iq=1,nQ
 
-      if( Q .gt. kminus(Q) ) cycle 
-      if( Q .eq. kminus(Q) ) then
-        fXX=1.d0
+      if(Qsym_only) then
+        Q = xQ(iq) 
       else
-        fXX=2.d0
+        Q = iq
+      endif
+
+      ! is this correct in the UHF case? Probably not if time-reversal is
+      ! broken! CHECK!!!
+!      if( Q .gt. kminus(Q) ) cycle 
+      if(Qsym_only) then
+        fXX=wQ(iq)
+      else
+        fXX=1.d0/(nksym*1.0d0)
       endif
       max_scl_intg = (0.d0,0.d0) 
       max_scl = 0.d0
@@ -1514,19 +1535,12 @@ MODULE twobody_hamiltonian
 
       ncholQ(Q) = nchol
       CALL start_clock ( 'orb_cholwrt' )
-!      if(root_image == me_image) then
-        do ik=1,nkloc 
-          do ispin=1,n_spin
-            ka = k_beg + ik - 1
-            call write_cholesky(Q,ka,ispin,nchol,Chol(:,:,ik,ispin))
-          enddo
+      do ik=1,nkloc 
+        do ispin=1,n_spin
+          ka = k_beg + ik - 1
+          call write_cholesky(Q,ka,ispin,nchol,Chol(:,:,ik,ispin))
         enddo
-!        call esh5_posthf_cholesky_root(h5id_hamil%id,Q,k_beg-1,n_spin*nkloc,ab_beg-1,nabpair,nchol,  &
-!                  n_spin*nksym,nabtot,nchol_max,Chol(1,1,1,1),error)
-!      else
-!        call esh5_posthf_cholesky(h5id_hamil%id,Q,k_beg-1,n_spin*nkloc,ab_beg-1,nabpair,nchol,  &
-!                  n_spin*nksym,nabtot,nchol_max,Chol(1,1,1,1),error)
-!      endif
+      enddo
       CALL stop_clock ( 'orb_cholwrt' )
       if(error.ne.0) &
         call errore('pw2posthf','Error in esh5_posthf_cholesky',error)
@@ -1602,21 +1616,11 @@ MODULE twobody_hamiltonian
     CALL stop_clock ( 'orb_cholesky' )
     call mp_sum(eX,intra_image_comm)
     if(ionode) then
-      write(*,*) 'EJ(MF)  (Ha):',0.5d0*eJ/(nksym*1.0)
-      write(*,*) 'EXX(MF) (Ha):',0.5d0*eX/(nksym*1.0)
-    endif
-
-    ! you should find a way to write n_spin in the hamil file
-    if(noncolin) then
-!      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup+ndown,0,e0*nksym,efc*nksym,nksym,xkcart, &
-!                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
-    else
-!      CALL esh5_posthf_kpoint_info(h5id_hamil%id,nup,ndown,e0*nksym,efc*nksym,nksym,xkcart, &
-!                                kminus,QKtoK2,h5id_orbs%norbK,ncholQ)
+      write(*,*) 'EJ(MF)  (Ha):',0.5d0*eJ
+      write(*,*) 'EXX(MF) (Ha):',0.5d0*eX
     endif
 
     if(me_image .ne. root_image) then 
-!      CALL esh5_posthf_close_file(h5id_hamil%id)
       call qeh5_close(qeh5_hamil)
     endif
     if(nproc_image > 1) call mp_barrier( intra_image_comm )
@@ -1635,7 +1639,7 @@ MODULE twobody_hamiltonian
     if(ionode) then
       if(nproc_image > 1) then
         CALL start_clock ( 'orb_join_h5' )
-        call join_h5(comm)
+        call join_h5(comm,Qsym_only)
         CALL start_clock ( 'orb_join_h5' )
       endif
       call write_hamil_meta()
@@ -1746,19 +1750,25 @@ MODULE twobody_hamiltonian
           !
         END SUBROUTINE write_cholesky
         !
-        SUBROUTINE join_h5(bounds) 
+        SUBROUTINE join_h5(bounds,Qsym_only) 
           USE io_files, ONLY: delete_if_present
           !
           IMPLICIT NONE
           !
           REAL(DP), INTENT(INOUT) :: bounds(:)
+          LOGICAL, INTENT(IN) :: Qsym_only
           !
-          INTEGER :: ip,Q,ka,ispin,nchol,ipool,n
+          INTEGER :: iq,nQ,ip,Q,ka,ispin,nchol,ipool,n
           CHARACTER(LEN=4) :: Qstr,kstr,sstr
           TYPE(qeh5_file) :: ip_file,ham,moL,ip_ham,ip_moL
           TYPE(qeh5_dataset) :: dset,ip_dset
           INTEGER :: dims(2), offset(2)
           !
+          if(Qsym_only) then
+            nQ=nQuniq
+          else
+            nQ=nksym
+          endif
           call qeh5_open_group(qeh5_hamil, "Hamiltonian", ham)
           call qeh5_open_group(ham, "MOCholesky", moL)
           do ipool=1,npool
@@ -1775,7 +1785,13 @@ MODULE twobody_hamiltonian
             call qeh5_open_group(ip_ham, "MOCholesky", ip_moL)
 
             ! restrict to symmetry ineq ones
-            do Q = 1,nksym 
+            do iq = 1,nQ
+
+            if(Qsym_only) then
+              Q = xQ(iq)
+            else
+              Q = iq
+            endif 
 
             nchol = ncholQ(Q)    
             do ik = 1,int(bounds(4*ip+2)) 
