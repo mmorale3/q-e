@@ -548,8 +548,6 @@ MODULE orbital_generators
     h5id_output_orbs%norbK(:) = 0
     mixed_basis = .true.   
 
-    if(nspin>1) call errore('generate_full_pw_basis',' nspin>1 ',1)
-
     do ik=1,nksym
       !
       npw = ngksym(ik) 
