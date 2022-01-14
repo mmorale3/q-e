@@ -486,6 +486,8 @@ MODULE moire
   !! if .TRUE. do 2D moire calculation
   REAL(DP) :: amoire = 0.0_dp
   !! moire lattice constant in effective bohr radius ab*eps/mstar
+  REAL(DP) :: eha = 0.0_dp
+  !! effective Hartree energy ha*mstar/eps**2
   !
 END MODULE moire
 !

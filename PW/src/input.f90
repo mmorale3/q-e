@@ -189,7 +189,8 @@ SUBROUTINE iosys()
                        starting_spin_angle_ => starting_spin_angle
   !
   USE moire, ONLY : lmoire_ => lmoire, &
-                    amoire_ => amoire
+                    amoire_ => amoire, &
+                    eha_    => eha
   !
   USE symm_base, ONLY : no_t_rev_ => no_t_rev, nofrac, allfrac, &
                         nosym_ => nosym, nosym_evc_=> nosym_evc
@@ -680,6 +681,7 @@ SUBROUTINE iosys()
   if (lmoire) THEN
     amoire_ = amoire_in_ang/BOHR_RADIUS_ANGS
     amoire_ = amoire_*mstar/epsmoire
+    eha_ = mstar/epsmoire/epsmoire
   endif ! lmoire
   !
   ! NONCOLLINEAR MAGNETISM, MAGNETIC CONSTRAINTS
