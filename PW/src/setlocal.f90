@@ -36,7 +36,7 @@ SUBROUTINE setlocal
   USE esm,               ONLY : esm_local, esm_bc, do_comp_esm
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
-  USE input_parameters,  ONLY : lmoire, vmoire_in_mev, pmoire_in_deg
+  USE moire,             ONLY : lmoire, vmoire, pmoire
   !
   IMPLICIT NONE
   !
@@ -46,20 +46,18 @@ SUBROUTINE setlocal
   ! counter on atom types
   ! counter on g vectors
   !
-  double precision :: rfrac(3), rvec(3), gj(3), vm, phi, g6(3,6), vj
+  double precision :: rfrac(3), rvec(3), gj(3), g6(3,6), vj
   integer :: ir, i, j, k, jg, iat
   logical :: offrange
   !
   if (lmoire) then
   vltot(:) = 0.d0
-  if (abs(vmoire_in_mev) < eps8) then
+  if (abs(vmoire) < eps8) then
     write(stdout,*) " no moire potential to add"
     return
   endif
-  vm = vmoire_in_mev*1e-3/AUTOEV*e2  ! e2 converts Ha to Ry
-  phi = pmoire_in_deg/180.d0*pi
   call hex_shell(g6)
-  write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
+  write(stdout, '("     Moire potential Vm = ",f12.2," eha on G shell:")') vmoire
   write(stdout, *) "       cartesian:"
   do iat=1,6
     write(stdout, '("     ",3f11.6)') g6(:,iat)
@@ -82,14 +80,14 @@ SUBROUTINE setlocal
     vj = 0.d0
     gj_loop: do jg=1,3
       gj = g6(:,2*jg)
-      vj = vj+2*cos(phi+dot_product(gj,rvec))
+      vj = vj+2*cos(pmoire+dot_product(gj,rvec))
     enddo gj_loop
-    vltot(ir) = vm*vj
+    vltot(ir) = vmoire*vj
     !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo r_loop
   v_of_0 = sum(vltot)/dfftp%nnr
   call mp_sum(v_of_0, intra_bgrp_comm)
-  write(stdout, '("     Moire V(G=0): ", f11.6, " meV")') v_of_0*AUTOEV*1e3
+  write(stdout, '("     Moire V(G=0): ", f11.6, " eha")') v_of_0
   else ! not lmoire
   ALLOCATE( aux(dfftp%nnr) )
   aux(:) = (0.d0,0.d0)
