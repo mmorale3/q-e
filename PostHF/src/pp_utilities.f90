@@ -19,7 +19,7 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
   USE coulomb_vcut_module,  ONLY: vcut_get,  vcut_spheric_get
   USE posthf_mod, ONLY:  use_coulomb_vcut_ws, use_coulomb_vcut_spheric, &
                 vcut, exxdiv
-  USE input_parameters, ONLY: lmoire, amoire_in_ang, epsmoire
+  USE moire, ONLY: lmoire, amoire
   !
   IMPLICIT NONE
   !
@@ -35,9 +35,6 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
   REAL(DP) :: q(3), qq, x
   LOGICAL :: odg(3)
   REAL(DP)         :: eps_qdiv = 1.d-8 ! |q| > eps_qdiv
-  REAL(DP) :: amoire
-  !
-  amoire = amoire_in_ang/BOHR_RADIUS_ANGS
   IF( use_coulomb_vcut_ws ) THEN
      DO ig = 1, ngm
         q(:)= ( xk(:) - xkq(:) + g(:,ig) ) * tpiba
@@ -70,7 +67,7 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
           if (abs(g(3,ig)) > eps8) then
             fac(ig) = 0.d0
           else
-            fac(ig) = e2*tpi/sqrt(qq)/(epsmoire*amoire)*at(3,3)*alat
+            fac(ig) = e2*tpi/sqrt(qq)/amoire*at(3,3)*alat
           endif
         else
           fac(ig)=e2*fpi/qq
