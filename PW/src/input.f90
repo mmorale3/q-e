@@ -187,7 +187,9 @@ SUBROUTINE iosys()
   USE spin_orb, ONLY : lspinorb_ => lspinorb,  &
                        lforcet_ => lforcet,    &
                        starting_spin_angle_ => starting_spin_angle
-
+  !
+  USE moire, ONLY : lmoire_ => lmoire, &
+                    amoire_ => amoire
   !
   USE symm_base, ONLY : no_t_rev_ => no_t_rev, nofrac, allfrac, &
                         nosym_ => nosym, nosym_evc_=> nosym_evc
@@ -260,7 +262,8 @@ SUBROUTINE iosys()
                                esm_bc, esm_efield, esm_w, esm_nfit, esm_a,    &
                                lgcscf,                                        &
                                zgate, relaxz, block, block_1, block_2,        &
-                               block_height
+                               block_height, lmoire, amoire_in_ang, epsmoire, &
+                               mstar
   !
   ! ... ELECTRONS namelist
   !
@@ -670,6 +673,14 @@ SUBROUTINE iosys()
      ENDIF
      f_inp_ = f_inp
   ENDIF
+  !
+  ! MOIRE POTENTIAL
+  !
+  lmoire_ = lmoire
+  if (lmoire) THEN
+    amoire_ = amoire_in_ang/BOHR_RADIUS_ANGS
+    amoire_ = amoire_*mstar/epsmoire
+  endif ! lmoire
   !
   ! NONCOLLINEAR MAGNETISM, MAGNETIC CONSTRAINTS
   !
