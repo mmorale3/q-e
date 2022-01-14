@@ -52,6 +52,10 @@ SUBROUTINE setlocal
   !
   if (lmoire) then
   vltot(:) = 0.d0
+  if (abs(vmoire_in_mev) < eps8) then
+    write(stdout,*) " no moire potential to add"
+    return
+  endif
   vm = vmoire_in_mev*1e-3/AUTOEV*e2  ! e2 converts Ha to Ry
   phi = pmoire_in_deg/180.d0*pi
   call hex_shell(g6)
