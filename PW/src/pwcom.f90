@@ -490,6 +490,8 @@ MODULE moire
   !! effective Hartree energy ha*mstar/eps**2
   REAL(DP) :: vmoire = 0.0_dp
   !! moire potential depth in eha
+  REAL(DP) :: pmoire = 0.0_dp
+  !! moire potential shape in radian
   !
 END MODULE moire
 !
