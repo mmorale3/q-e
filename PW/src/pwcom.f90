@@ -488,6 +488,8 @@ MODULE moire
   !! moire lattice constant in effective bohr radius ab*eps/mstar
   REAL(DP) :: eha = 0.0_dp
   !! effective Hartree energy ha*mstar/eps**2
+  REAL(DP) :: vmoire = 0.0_dp
+  !! moire potential depth in eha
   !
 END MODULE moire
 !

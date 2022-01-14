@@ -190,7 +190,8 @@ SUBROUTINE iosys()
   !
   USE moire, ONLY : lmoire_ => lmoire, &
                     amoire_ => amoire, &
-                    eha_    => eha
+                    eha_    => eha,    &
+                    vmoire_ => vmoire
   !
   USE symm_base, ONLY : no_t_rev_ => no_t_rev, nofrac, allfrac, &
                         nosym_ => nosym, nosym_evc_=> nosym_evc
@@ -264,7 +265,7 @@ SUBROUTINE iosys()
                                lgcscf,                                        &
                                zgate, relaxz, block, block_1, block_2,        &
                                block_height, lmoire, amoire_in_ang, epsmoire, &
-                               mstar
+                               mstar, vmoire_in_mev
   !
   ! ... ELECTRONS namelist
   !
@@ -679,9 +680,11 @@ SUBROUTINE iosys()
   !
   lmoire_ = lmoire
   if (lmoire) THEN
-    amoire_ = amoire_in_ang/BOHR_RADIUS_ANGS
-    amoire_ = amoire_*mstar/epsmoire
+    amoire_ = amoire_in_ang/bohr_radius_angs ! in bohr
+    amoire_ = amoire_*mstar/epsmoire ! effetive bohr
     eha_ = mstar/epsmoire/epsmoire
+    vmoire_ = vmoire_in_mev*1e-3/autoev  ! in ha
+    vmoire_ = vmoire_/eha_ ! effetive ha
   endif ! lmoire
   !
   ! NONCOLLINEAR MAGNETISM, MAGNETIC CONSTRAINTS
