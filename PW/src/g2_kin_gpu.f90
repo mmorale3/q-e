@@ -19,7 +19,6 @@ SUBROUTINE g2_kin_gpu ( ik )
   USE gvect,                ONLY : g_d
   USE wvfct_gpum,           ONLY : g2kin_d, using_g2kin_d
   USE moire,                ONLY : lmoire, amoire
-  USE input_parameters,     ONLY : mstar
   !
   IMPLICIT NONE
   !
@@ -32,7 +31,7 @@ SUBROUTINE g2_kin_gpu ( ik )
   REAL(DP):: k2pre
   !
   if (lmoire) then
-    k2pre = tpiba2/amoire/amoire/mstar
+    k2pre = tpiba2/amoire/amoire
   else
     k2pre = tpiba2
   endif

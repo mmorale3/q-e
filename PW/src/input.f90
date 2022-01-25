@@ -685,9 +685,9 @@ SUBROUTINE iosys()
     vmoire_ = vmoire_in_mev*1e-3/autoev*e2 ! in Ry
     pmoire_ = pmoire_in_deg/180.d0*pi
     ! change energy unit
-    !eha_ = mstar/epsmoire/epsmoire
-    !amoire_ = amoire_*mstar/epsmoire ! effetive bohr
-    !vmoire_ = vmoire_/eha_ ! effetive Ry
+    eha_ = mstar/epsmoire/epsmoire
+    amoire_ = amoire_*mstar/epsmoire ! effetive bohr
+    vmoire_ = vmoire_/eha_ ! effetive Ry
   endif ! lmoire
   !
   ! NONCOLLINEAR MAGNETISM, MAGNETIC CONSTRAINTS

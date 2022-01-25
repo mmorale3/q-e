@@ -20,7 +20,6 @@ SUBROUTINE g2_kin( ik )
   USE wvfct,                ONLY : g2kin
   USE wvfct_gpum,           ONLY : using_g2kin
   USE moire,                ONLY : lmoire, amoire
-  USE input_parameters,     ONLY : mstar
   !
   IMPLICIT NONE
   !
@@ -32,7 +31,7 @@ SUBROUTINE g2_kin( ik )
   REAL(DP) :: k2pre
   !
   if (lmoire) then
-    k2pre = tpiba2/amoire/amoire/mstar
+    k2pre = tpiba2/amoire/amoire
   else
     k2pre = tpiba2
   endif
