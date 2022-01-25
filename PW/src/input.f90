@@ -21,7 +21,7 @@ SUBROUTINE iosys()
   
   USE control_flags, ONLY : adapt_thr, tr2_init, tr2_multi  
   USE constants,     ONLY : autoev, eV_to_kelvin, pi, rytoev, &
-                            ry_kbar, amu_ry, bohr_radius_angs, eps8
+                            ry_kbar, amu_ry, bohr_radius_angs, eps8, e2
   USE mp_pools,      ONLY : npool
   !
   USE io_global,     ONLY : stdout, ionode, ionode_id
@@ -684,8 +684,8 @@ SUBROUTINE iosys()
     amoire_ = amoire_in_ang/bohr_radius_angs ! in bohr
     amoire_ = amoire_*mstar/epsmoire ! effetive bohr
     eha_ = mstar/epsmoire/epsmoire
-    vmoire_ = vmoire_in_mev*1e-3/autoev  ! in ha
-    vmoire_ = vmoire_/eha_ ! effetive ha
+    vmoire_ = vmoire_in_mev*1e-3/autoev*e2 ! in Ry
+    vmoire_ = vmoire_/eha_ ! effetive Ry
     pmoire_ = pmoire_in_deg/180.d0*pi
   endif ! lmoire
   !
