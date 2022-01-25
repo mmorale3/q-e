@@ -49,6 +49,7 @@ SUBROUTINE sum_vrs( nrxx, nspin, vltot, vr, vrs )
   !! Accumulates local potential contributions into vrs (the total local potential).
   !
   USE kinds
+  USE input_parameters, ONLY : lob
   !
   IMPLICIT NONE
   !
@@ -77,9 +78,10 @@ SUBROUTINE sum_vrs( nrxx, nspin, vltot, vr, vrs )
         !
         ! noncolinear case: only the first component contains vltot
         !
-        vrs(:,is) = vr(:,is)
+        if (.not.lob) vrs(:,is) = vr(:,is)
      ELSE
-        vrs(:,is) = vltot(:) + vr(:,is)
+        vrs(:,is) = vltot(:)
+        if (.not.lob) vrs(:,is) = vrs(:, is) + vr(:,is)
      ENDIF
      !
   ENDDO

@@ -263,6 +263,9 @@ MODULE input_parameters
         LOGICAL :: tqmmm = .FALSE.
         !! QM/MM coupling. enabled if TRUE
 
+        LOGICAL :: lob = .FALSE.
+        !! one-body calculation. enabled if TRUE
+
         CHARACTER(len=256) :: vdw_table_name = ' '
 
         CHARACTER(len=10) :: point_label_type='SC'
@@ -288,7 +291,7 @@ MODULE input_parameters
           gdir, nppstr, wf_collect, lelfield, nberrycyc, refg,            &
           tefield2, saverho, tabps, use_wannier, lecrpa,                  &
           lfcp, tqmmm, vdw_table_name, lorbm, memory, point_label_type,   &
-          input_xml_schema_file, gate
+          input_xml_schema_file, gate, lob
 !
 !=----------------------------------------------------------------------------=!
 !  SYSTEM Namelist Input Parameters
