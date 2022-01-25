@@ -17,7 +17,7 @@ SUBROUTINE setlocal
   !
   USE io_global,         ONLY : stdout
   USE kinds,             ONLY : DP
-  USE constants,         ONLY : eps8, pi, AUTOEV, e2
+  USE constants,         ONLY : eps8, pi
   USE ions_base,         ONLY : zv, ntyp => nsp, nat, tau
   USE cell_base,         ONLY : omega, at, alat
   USE extfield,          ONLY : tefield, dipfield, etotefield, gate, &
@@ -37,6 +37,7 @@ SUBROUTINE setlocal
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
   USE moire,             ONLY : lmoire, vmoire, pmoire
+  USE input_parameters,  ONLY : vmoire_in_mev
   !
   IMPLICIT NONE
   !
@@ -52,12 +53,13 @@ SUBROUTINE setlocal
   !
   if (lmoire) then
   vltot(:) = 0.d0
+  write(stdout, '("     Vm = ",f18.8," eRy")') vmoire
   if (abs(vmoire) < eps8) then
     write(stdout,*) " no moire potential to add"
     return
   endif
   call hex_shell(g6)
-  write(stdout, '("     Moire potential Vm = ",f12.2," eha on G shell:")') vmoire
+  write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
   write(stdout, *) "       cartesian:"
   do iat=1,6
     write(stdout, '("     ",3f11.6)') g6(:,iat)
