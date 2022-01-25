@@ -723,6 +723,7 @@ MODULE exx_base
     USE constants,  ONLY : fpi, e2, pi, tpi, eps8
     USE constants,  ONLY : BOHR_RADIUS_ANGS
     USE moire,      ONLY : lmoire, amoire
+    USE input_parameters, ONLY: epsmoire
     !
     IMPLICIT NONE
     !
@@ -815,7 +816,7 @@ MODULE exx_base
          ELSE
             if (lmoire) then
             if (abs(g(3,ig)) > eps8) cycle
-            fac(ig) = e2*tpi/( sqrt(qq) + yukawa )/amoire*at(3,3)*alat * grid_factor_track(ig)
+            fac(ig) = e2*tpi/( sqrt(qq) + yukawa )/amoire/epsmoire*at(3,3)*alat * grid_factor_track(ig)
             else
             fac(ig) = e2*fpi/( qq + yukawa ) * grid_factor_track(ig) ! as HARTREE
             endif ! lmoire
