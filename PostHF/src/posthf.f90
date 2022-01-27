@@ -21,6 +21,12 @@ PROGRAM posthf
   USE environment,ONLY : environment_start, environment_end
   USE klist, ONLY: qnorm,nks,xk
   USE input_parameters,  ONLY : lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire
+  USE moire, ONLY : lmoire_ => lmoire, &
+                    amoire_ => amoire, &
+                    eha_    => eha,    &
+                    vmoire_ => vmoire, &
+                    pmoire_ => pmoire
+  USE constants, ONLY: autoev, bohr_radius_angs, pi
   USE KINDS, ONLY : DP
   !
   IMPLICIT NONE
@@ -130,6 +136,18 @@ PROGRAM posthf
   CALL mp_bcast(pmoire_in_deg, ionode_id, world_comm)
   CALL mp_bcast(mstar, ionode_id, world_comm)
   CALL mp_bcast(epsmoire, ionode_id, world_comm)
+  ! 
+  ! ... transfer inputs to internal vairables
+  ! 
+  lmoire_ = lmoire
+  if (lmoire) THEN
+    amoire_ = amoire_in_ang/bohr_radius_angs ! in bohr
+    amoire_ = amoire_*mstar/epsmoire ! effetive bohr
+    eha_ = mstar/epsmoire/epsmoire
+    vmoire_ = vmoire_in_mev*1e-3/autoev  ! in ha
+    vmoire_ = vmoire_/eha_ ! effetive ha
+    pmoire_ = pmoire_in_deg/180.d0*pi
+  endif ! lmoire
   !
   ! MAM: Problematic situation, I need to modify qnorm before init_us_1 is 
   !      called in read_file, but to modify qnorm accurately I need to know

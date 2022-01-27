@@ -17,7 +17,7 @@ SUBROUTINE setlocal
   !
   USE io_global,         ONLY : stdout
   USE kinds,             ONLY : DP
-  USE constants,         ONLY : eps8, pi, AUTOEV, e2
+  USE constants,         ONLY : eps8, pi
   USE ions_base,         ONLY : zv, ntyp => nsp, nat, tau
   USE cell_base,         ONLY : omega, at, alat
   USE extfield,          ONLY : tefield, dipfield, etotefield, gate, &
@@ -36,7 +36,8 @@ SUBROUTINE setlocal
   USE esm,               ONLY : esm_local, esm_bc, do_comp_esm
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
-  USE input_parameters,  ONLY : lmoire, vmoire_in_mev, pmoire_in_deg
+  USE moire,             ONLY : lmoire, vmoire, pmoire
+  USE input_parameters,  ONLY : vmoire_in_mev
   !
   IMPLICIT NONE
   !
@@ -46,14 +47,17 @@ SUBROUTINE setlocal
   ! counter on atom types
   ! counter on g vectors
   !
-  double precision :: rfrac(3), rvec(3), gj(3), vm, phi, g6(3,6), vj
+  double precision :: rfrac(3), rvec(3), gj(3), g6(3,6), vj
   integer :: ir, i, j, k, jg, iat
   logical :: offrange
   !
   if (lmoire) then
   vltot(:) = 0.d0
-  vm = vmoire_in_mev*1e-3/AUTOEV*e2  ! e2 converts Ha to Ry
-  phi = pmoire_in_deg/180.d0*pi
+  write(stdout, '("     Vm = ",f18.8," eRy")') vmoire
+  if (abs(vmoire) < eps8) then
+    write(stdout,*) " no moire potential to add"
+    return
+  endif
   call hex_shell(g6)
   write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
   write(stdout, *) "       cartesian:"
@@ -78,14 +82,14 @@ SUBROUTINE setlocal
     vj = 0.d0
     gj_loop: do jg=1,3
       gj = g6(:,2*jg)
-      vj = vj+2*cos(phi+dot_product(gj,rvec))
+      vj = vj+2*cos(pmoire+dot_product(gj,rvec))
     enddo gj_loop
-    vltot(ir) = vm*vj
+    vltot(ir) = vmoire*vj
     !write(42, '(3f16.8,f16.8)') rvec, vltot(ir)
   enddo r_loop
   v_of_0 = sum(vltot)/dfftp%nnr
   call mp_sum(v_of_0, intra_bgrp_comm)
-  write(stdout, '("     Moire V(G=0): ", f11.6, " meV")') v_of_0*AUTOEV*1e3
+  write(stdout, '("     Moire V(G=0): ", f11.6, " eha")') v_of_0
   else ! not lmoire
   ALLOCATE( aux(dfftp%nnr) )
   aux(:) = (0.d0,0.d0)

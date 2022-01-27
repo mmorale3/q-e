@@ -62,7 +62,7 @@ MODULE posthf_mod
     USE noncollin_module,     ONLY : noncolin, npol
     USE exx_base, ONLY: nq1,nq2,nq3, &  
             x_gamma_extrapolation, exx_divergence
-    USE input_parameters, ONLY: lmoire
+    USE moire, ONLY: lmoire
     !
     IMPLICIT NONE
     !

@@ -524,7 +524,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   USE martyna_tuckerman, ONLY : wg_corr_h, do_comp_mt
   USE esm,               ONLY : do_comp_esm, esm_hartree, esm_bc
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_2D, cutoff_hartree  
-  USE input_parameters,  ONLY : lmoire, epsmoire, amoire_in_ang
+  USE moire,             ONLY : lmoire, amoire
   !
   IMPLICIT NONE
   !
@@ -544,8 +544,6 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   INTEGER               :: is, ig
   COMPLEX(DP), ALLOCATABLE :: aux(:), rgtot(:), vaux(:)
   INTEGER               :: nt
-  double precision :: amoire
-  amoire = amoire_in_ang/BOHR_RADIUS_ANGS
   !
   CALL start_clock( 'v_h' )
   !
@@ -599,7 +597,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
      ENDIF
      !
      if (lmoire) then
-     fac = e2 * tpi / tpiba / (epsmoire*amoire) * at(3, 3)*alat
+     fac = e2 * tpi / tpiba / amoire * at(3, 3)*alat
      else
      fac = e2 * fpi / tpiba2
      endif ! lmoire

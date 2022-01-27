@@ -476,6 +476,27 @@ END MODULE spin_orb
 !
 !
 !
+MODULE moire
+  USE kinds, ONLY : DP
+  !
+  !! Variables needed for calculations with moire e-i potential
+  !
+  SAVE
+  LOGICAL :: lmoire
+  !! if .TRUE. do 2D moire calculation
+  REAL(DP) :: amoire = 0.0_dp
+  !! moire lattice constant in effective bohr radius ab*eps/mstar
+  REAL(DP) :: eha = 0.0_dp
+  !! effective Hartree energy ha*mstar/eps**2
+  REAL(DP) :: vmoire = 0.0_dp
+  !! moire potential depth in eha
+  REAL(DP) :: pmoire = 0.0_dp
+  !! moire potential shape in radian
+  !
+END MODULE moire
+!
+!
+!
 MODULE pwcom
   !
   USE klist
@@ -488,5 +509,6 @@ MODULE pwcom
   USE cellmd
   USE fixed_occ
   USE spin_orb
+  USE moire
   !
 END MODULE pwcom

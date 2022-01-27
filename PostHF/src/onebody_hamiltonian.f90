@@ -45,7 +45,7 @@ MODULE onebody_hamiltonian
     USE orbital_generators, ONLY: mixed_basis
     USE read_orbitals_from_file, ONLY: h5file_type
     USE constants, ONLY: BOHR_RADIUS_ANGS
-    USE input_parameters, ONLY: lmoire, amoire_in_ang, mstar
+    USE moire, ONLY: lmoire, amoire
     !
     IMPLICIT NONE
     !
@@ -57,7 +57,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP) :: ctemp
     INTEGER :: ia, ib, i0, no, error, npw,npw2
     INTEGER :: ik,ibnd, ikk, ispin
-    REAL(DP) :: fac, amoire, wm
+    REAL(DP) :: fac, wm
     COMPLEX(DP) :: CONE, CZERO, CNORM
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
@@ -66,8 +66,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     !
     if (lmoire) then
-      amoire = amoire_in_ang/BOHR_RADIUS_ANGS
-      wm = 1.d0/(mstar*amoire**2)
+      wm = 1.d0/amoire/amoire
     else ! default band width
       wm = 1.d0
     endif

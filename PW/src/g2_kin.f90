@@ -20,7 +20,7 @@ SUBROUTINE g2_kin( ik )
   USE wvfct,                ONLY : g2kin
   USE wvfct_gpum,           ONLY : using_g2kin
   USE constants,            ONLY : BOHR_RADIUS_ANGS
-  USE input_parameters,     ONLY : lmoire, amoire_in_ang, mstar
+  USE moire,                ONLY : lmoire, amoire
   !
   IMPLICIT NONE
   !
@@ -29,12 +29,10 @@ SUBROUTINE g2_kin( ik )
   ! ... local variables
   !
   INTEGER :: ig, npw
-  DOUBLE PRECISION :: wm, amoire, k2pre
+  REAL(DP) :: k2pre
   !
   if (lmoire) then
-    amoire = amoire_in_ang/BOHR_RADIUS_ANGS
-    wm = 1.d0/(mstar*amoire**2)
-    k2pre = tpiba2*wm
+    k2pre = tpiba2/amoire/amoire
   else
     k2pre = tpiba2
   endif

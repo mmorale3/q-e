@@ -21,7 +21,7 @@ SUBROUTINE iosys()
   
   USE control_flags, ONLY : adapt_thr, tr2_init, tr2_multi  
   USE constants,     ONLY : autoev, eV_to_kelvin, pi, rytoev, &
-                            ry_kbar, amu_ry, bohr_radius_angs, eps8
+                            ry_kbar, amu_ry, bohr_radius_angs, eps8, e2
   USE mp_pools,      ONLY : npool
   !
   USE io_global,     ONLY : stdout, ionode, ionode_id
@@ -187,7 +187,12 @@ SUBROUTINE iosys()
   USE spin_orb, ONLY : lspinorb_ => lspinorb,  &
                        lforcet_ => lforcet,    &
                        starting_spin_angle_ => starting_spin_angle
-
+  !
+  USE moire, ONLY : lmoire_ => lmoire, &
+                    amoire_ => amoire, &
+                    eha_    => eha,    &
+                    vmoire_ => vmoire, &
+                    pmoire_ => pmoire
   !
   USE symm_base, ONLY : no_t_rev_ => no_t_rev, nofrac, allfrac, &
                         nosym_ => nosym, nosym_evc_=> nosym_evc
@@ -260,7 +265,8 @@ SUBROUTINE iosys()
                                esm_bc, esm_efield, esm_w, esm_nfit, esm_a,    &
                                lgcscf,                                        &
                                zgate, relaxz, block, block_1, block_2,        &
-                               block_height
+                               block_height, lmoire, amoire_in_ang, epsmoire, &
+                               mstar, vmoire_in_mev, pmoire_in_deg
   !
   ! ... ELECTRONS namelist
   !
@@ -670,6 +676,18 @@ SUBROUTINE iosys()
      ENDIF
      f_inp_ = f_inp
   ENDIF
+  !
+  ! MOIRE POTENTIAL
+  !
+  lmoire_ = lmoire
+  if (lmoire) THEN
+    amoire_ = amoire_in_ang/bohr_radius_angs ! in bohr
+    amoire_ = amoire_*mstar/epsmoire ! effetive bohr
+    eha_ = mstar/epsmoire/epsmoire
+    vmoire_ = vmoire_in_mev*1e-3/autoev*e2 ! in Ry
+    vmoire_ = vmoire_/eha_ ! effetive Ry
+    pmoire_ = pmoire_in_deg/180.d0*pi
+  endif ! lmoire
   !
   ! NONCOLLINEAR MAGNETISM, MAGNETIC CONSTRAINTS
   !
