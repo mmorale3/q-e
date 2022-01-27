@@ -142,11 +142,12 @@ PROGRAM posthf
   lmoire_ = lmoire
   if (lmoire) THEN
     amoire_ = amoire_in_ang/bohr_radius_angs ! in bohr
-    amoire_ = amoire_*mstar/epsmoire ! effetive bohr
-    eha_ = mstar/epsmoire/epsmoire
-    vmoire_ = vmoire_in_mev*1e-3/autoev  ! in ha
-    vmoire_ = vmoire_/eha_ ! effetive ha
+    vmoire_ = vmoire_in_mev*1e-3/autoev*e2 ! in Ry
     pmoire_ = pmoire_in_deg/180.d0*pi
+    ! change energy unit
+    eha_ = mstar/epsmoire/epsmoire
+    amoire_ = amoire_*mstar/epsmoire ! effetive bohr
+    vmoire_ = vmoire_/eha_ ! effetive Ry
   endif ! lmoire
   !
   ! MAM: Problematic situation, I need to modify qnorm before init_us_1 is 

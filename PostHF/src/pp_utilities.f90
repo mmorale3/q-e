@@ -19,7 +19,7 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
   USE coulomb_vcut_module,  ONLY: vcut_get,  vcut_spheric_get
   USE posthf_mod, ONLY:  use_coulomb_vcut_ws, use_coulomb_vcut_spheric, &
                 vcut, exxdiv
-  USE moire, ONLY: lmoire, amoire
+  USE moire, ONLY: lmoire
   !
   IMPLICIT NONE
   !
@@ -67,7 +67,7 @@ SUBROUTINE g2_convolution(ngm, g, xk, xkq, fac)
           if (abs(g(3,ig)) > eps8) then
             fac(ig) = 0.d0
           else
-            fac(ig) = e2*tpi/sqrt(qq)/amoire*at(3,3)*alat
+            fac(ig) = e2*tpi/sqrt(qq)*at(3,3)*alat
           endif
         else
           fac(ig)=e2*fpi/qq
