@@ -521,7 +521,7 @@ MODULE orbital_generators
   !
   END SUBROUTINE generate_orbitals
 
-  SUBROUTINE generate_full_pw_basis(out_prefix,dfft)
+  SUBROUTINE generate_full_pw_basis(out_prefix,dfft,nbasis)
     !
     USE cell_base, ONLY: alat, tpiba, at, bg
     USE fft_types, ONLY: fft_type_descriptor
@@ -530,6 +530,7 @@ MODULE orbital_generators
     !
     CHARACTER(len=256), INTENT(IN) :: out_prefix
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
+    INTEGER, OPTIONAL :: nbasis
     !
     CHARACTER(len=256) :: tmp
     INTEGER :: i, ik, npw, n, error 
@@ -551,6 +552,7 @@ MODULE orbital_generators
     do ik=1,nksym
       !
       npw = ngksym(ik) 
+      if(present(nbasis)) npw=nbasis
       h5id_output_orbs%norbK(ik) = npw
       !
       do n=1,npw

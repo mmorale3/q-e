@@ -459,6 +459,19 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
     if(get_rpa) &
       write(*,*) 'ERPA (Ha):',erpa
 
+  ! hack!!! 
+  elseif(TRIM(run_type) == 'hamil_pw') then
+
+    call pyscf_driver_hamil_pw(out_prefix, read_from_h5, h5_add_orbs, &
+       ndet, eigcut, nextracut, thresh, ncmax, &
+       get_hf, get_mp2, get_rpa, update_qe_bands, e1, emp2, erpa)
+    if(get_hf) &
+      write(*,*) 'E0, E1, E1_SO (Ha):',e0,e1/(nkfull*1.0),e1_so/(nkfull*1.0)
+    if(get_mp2) &
+      write(*,*) 'EMP2 (Ha):',emp2
+    if(get_rpa) &
+      write(*,*) 'ERPA (Ha):',erpa
+
   elseif(TRIM(run_type) == 'mp2_fullpw') then
 
     call pyscf_driver_mp2(out_prefix,.true.,'fullpw',0,'',0.d0,0.d0,&

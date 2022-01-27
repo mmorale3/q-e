@@ -788,6 +788,172 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   !
 end subroutine pyscf_driver_hamil
 
+! this is a hack for the 2D electron gas problem, be careful!
+subroutine pyscf_driver_hamil_pw(out_prefix_, nread_from_h5, h5_add_orbs_, &
+       ndet, eigcut, nextracut, thresh, ncholmax, &
+       get_hf, get_mp2, get_rpa, update_qe_bands, ehf, emp2, erpa)
+  !
+  USE mp_global, ONLY : nimage, nproc_image, me_image, root_image, &
+                        intra_image_comm
+  USE mp, ONLY: mp_barrier  
+  USE mp_pools, ONLY: npool
+  use fft_base,             ONLY : dffts
+  USE KINDS, ONLY: DP
+  USE io_files,  ONLY : tmp_dir
+  use fft_base,             ONLY : dffts
+  USE lsda_mod, ONLY: nspin
+  USE wvfct, ONLY: nbnd, wg 
+  USE klist,  ONLY : wk
+  USE orbital_generators, ONLY: generate_orbitals,write_trial_wavefunction, &
+                                diag_hf, verbose, davcio_to_esh5, generate_full_pw_basis
+  USE onebody_hamiltonian, ONLY: getH1
+  USE twobody_hamiltonian, ONLY: cholesky_r, calculate_KS_bscorr
+  USE mp2_module, ONLY: mp2_g,mp2no,approx_mp2no
+  USE rpa_module, ONLY: rpa_cholesky
+#if defined(__CUDA)
+  USE mp2_module, ONLY: mp2_gpu
+#endif
+  USE read_orbitals_from_file, ONLY: open_esh5_read,close_esh5_read, &
+                                     update_bands,h5file_type
+  USE posthf_mod, ONLY: norb,nksym,nmax_DM,DM,DM_mf,e0, efc, numspin
+  !
+  IMPLICIT NONE
+  !
+  CHARACTER(len=*), INTENT(IN) :: h5_add_orbs_,out_prefix_
+  REAL(kind=8), INTENT(IN) :: eigcut, nextracut, thresh, ncholmax
+  LOGICAL, INTENT(IN) :: get_hf, get_mp2, get_rpa, update_qe_bands
+  INTEGER, INTENT(IN) :: nread_from_h5, ndet
+  REAL(kind=8), INTENT(OUT) :: ehf, emp2, erpa
+  !
+  INTEGER :: h5len, oldh5, error
+  INTEGER :: maxnorb, nelmax
+  COMPLEX(DP), ALLOCATABLE :: M(:,:,:,:)  ! Overlap between basis states and
+                                            ! occupied KS states. 
+  CHARACTER(len=256) :: out_prefix, h5_add_orbs, h5qeorbs
+  CHARACTER(len=256) :: hamilFile,orbsFile,canOrbsFile
+  COMPLEX(DP) :: e1, e1_so, e2_mp2, e2_rpa, e1_mf, e1_so_mf
+  TYPE(h5file_type) :: h5id_hamil,h5id_orbs
+  REAL(DP) :: occeigcut  
+
+  occeigcut = 1.d-8
+  !
+  out_prefix = TRIM(out_prefix_)
+  h5_add_orbs = TRIM(h5_add_orbs_)
+  hamilFile = TRIM( tmp_dir )//TRIM( out_prefix ) // '.hamil.h5'
+  orbsFile = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.orbitals.h5'
+  canOrbsFile = TRIM( tmp_dir ) // TRIM( out_prefix ) // '.canonical.orbitals.h5'
+  h5qeorbs = TRIM( tmp_dir )//TRIM( out_prefix ) // '.qe.orbs.h5'
+  !
+  ehf=0.d0
+  emp2=0.d0  
+  erpa=0.d0  
+  e1=(0.d0,0.d0) 
+  e1_so=(0.d0,0.d0)  
+  e1_mf=(0.d0,0.d0) 
+  e1_so_mf=(0.d0,0.d0)  
+  e2_mp2=(0.d0,0.d0) 
+  !
+  if(npool > 1) call davcio_to_esh5(h5qeorbs,norb,dffts)
+  !
+  if(me_image == root_image) then
+    !
+    ! 1. generate orbitals
+    !
+    write(*,*) 'This is a hack for the electron gas problem, use with care!'
+    write(*,*) 'Generating pure PW orbitals'
+    CALL generate_full_pw_basis(out_prefix,dffts,norb) 
+    !
+    h5len = LEN_TRIM(hamilFile)
+    oldh5=0
+    CALL esh5_posthf_open_file(h5id_hamil%id,hamilFile,h5len,oldh5)
+
+    ! all tasks open orbital file in read_only mode
+    call open_esh5_read(h5id_orbs,orbsFile)
+    if( h5id_orbs%grid_type .ne. 1) &
+      call errore('pyscf_driver_hamil','grid_type ne 1',1)
+
+    ! calculates expansion of occupied KS states in the generated  
+    ! (spin-independent) basis and writes trial wfn to file
+    call get_nelmax(nbnd,nksym,numspin,wk,size(wg,1),wg,nelmax)
+    maxnorb = maxval(h5id_orbs%norbK(:))
+    allocate( M(maxnorb,nelmax,nksym,min(2,nspin)) )
+    if(npool > 1) then 
+      call write_trial_wavefunction(h5id_orbs,h5id_hamil,dffts, &
+                    nelmax,M,ndet,0.05d0,0.95d0,h5wfn=h5qeorbs)
+    else
+      call write_trial_wavefunction(h5id_orbs,h5id_hamil,dffts,&
+                    nelmax,M,ndet,0.05d0,0.95d0)
+    endif
+
+    ! calculate and write 1 body hamiltonian
+    ! make DM and optional argument to H1
+    CALL getH1(h5id_orbs,h5id_hamil,dffts,e1,e1_so,e1_mf,e1_so_mf)
+
+    CALL esh5_posthf_close_file(h5id_hamil%id)
+    call close_esh5_read(h5id_orbs)
+
+    h5len = LEN_TRIM(orbsFile)
+    oldh5 = 1
+    CALL esh5_posthf_open_file(h5id_hamil%id,TRIM(orbsFile),h5len,oldh5)
+
+    call esh5_posthf_write_orbmat(h5id_hamil%id,"SCFOrbMat",9,maxnorb,nelmax,nksym,size(M,4),M,error)
+    if(error .ne. 0 ) &
+      call errore('pw2posthf','error writing orbmat',1)
+
+    call esh5_posthf_write_dm(h5id_hamil%id,"DM",2,nmax_DM,nksym,nspin,DM,error)
+    if(error .ne. 0 ) &
+      call errore('pyscf_driver_hamil','error writing DM',1)
+    call esh5_posthf_write_dm(h5id_hamil%id,"DM_mf",5,nmax_DM,nksym,nspin,DM_mf,error)
+    if(error .ne. 0 ) &
+      call errore('pyscf_driver_hamil','error writing DM_mf',1)
+
+    write(*,*) 'E0, E1(1Det),E_SO(1Det) (Ha):',e0,e1/(nksym*1.0d0),e1_so/(nksym*1.0d0)
+    write(*,*) '    E1,E_SO (Ha):',e1_mf/(nksym*1.0),e1_so_mf/(nksym*1.0)
+
+    CALL esh5_posthf_close_file(h5id_hamil%id)
+    if(allocated(M)) deallocate(M)
+  endif
+  call mp_barrier(intra_image_comm)
+  if(update_qe_bands) then
+    call update_bands(orbsFile,dffts)
+  endif
+  call mp_barrier(intra_image_comm)
+
+  ! calculate cholesky matrix  
+! note: you can construct FockM here if you want, it would be 
+!       quite cheap. Add it as an optional
+  call cholesky_r(ncholmax,thresh,dffts,hamilFile,orbsFile)
+
+  ! mp2 requires hf rediag
+  if(get_hf .or. get_mp2 .or. get_rpa) then
+    call mp_barrier(intra_image_comm)
+    ! orbitals are read from esh5 only right now
+    call diag_hf(dffts,'full',hamilFile,orbsFile,orbsFile,canOrbsFile,.true.)
+  endif
+
+  if(get_mp2) then
+    call mp_barrier(intra_image_comm)
+#if defined(__CUDA)
+    call mp2_gpu(e2_mp2,dffts,canOrbsFile)
+#else
+    call mp2_g(e2_mp2,dffts,canOrbsFile)
+#endif
+    emp2 = real(dble(e2_mp2),kind=8)
+  endif
+  call mp_barrier(intra_image_comm)
+  !
+
+  if(get_rpa) then
+    call mp_barrier(intra_image_comm)
+    call rpa_cholesky(e2_rpa,dffts,"full",hamilFile,canOrbsFile)
+    erpa = real(dble(e2_rpa),kind=8)
+  endif
+  call mp_barrier(intra_image_comm)
+  !
+  call print_clock('')    
+  !
+end subroutine pyscf_driver_hamil_pw
+
 ! some of these drivers need to call pwscf from python. figure out how to do it!
 ! for some of these drivers
 ! to write: include option to calculate hf and mp2 energy on given basis
