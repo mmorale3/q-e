@@ -103,6 +103,7 @@ SUBROUTINE h_psi_( lda, n, m, psi, hpsi )
   USE fft_base,                ONLY: dffts
   USE exx,                     ONLY: use_ace, vexx, vexxace_gamma, vexxace_k
   USE xc_lib,                  ONLY: exx_is_active, xclib_dft_is
+  USE input_parameters,        ONLY: lob
   USE fft_helper_subroutines
   !
   USE wvfct_gpum,              ONLY: using_g2kin
@@ -257,7 +258,7 @@ SUBROUTINE h_psi_( lda, n, m, psi, hpsi )
   !
   ! ... Here the exact-exchange term Vxx psi
   !
-  IF ( exx_is_active() ) THEN
+  IF ( .not.lob .and. exx_is_active() ) THEN
      IF ( use_ace ) THEN
         IF ( gamma_only ) THEN
            CALL vexxace_gamma( lda, m, psi, ee, hpsi )
