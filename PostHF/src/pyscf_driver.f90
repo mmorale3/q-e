@@ -804,7 +804,7 @@ subroutine pyscf_driver_hamil_pw(out_prefix_, nread_from_h5, h5_add_orbs_, &
   USE lsda_mod, ONLY: nspin
   USE wvfct, ONLY: nbnd, wg 
   USE klist,  ONLY : wk
-  USE orbital_generators, ONLY: generate_orbitals,write_trial_wavefunction, &
+  USE orbital_generators, ONLY: generate_orbitals,write_trial_wavefunction,mixed_basis, &
                                 diag_hf, verbose, davcio_to_esh5, generate_full_pw_basis
   USE onebody_hamiltonian, ONLY: getH1
   USE twobody_hamiltonian, ONLY: cholesky_r, calculate_KS_bscorr
@@ -866,6 +866,8 @@ subroutine pyscf_driver_hamil_pw(out_prefix_, nread_from_h5, h5_add_orbs_, &
     h5len = LEN_TRIM(hamilFile)
     oldh5=0
     CALL esh5_posthf_open_file(h5id_hamil%id,hamilFile,h5len,oldh5)
+    ! generate fermi sea trial wfn
+    mixed_basis = .false.
 
     ! all tasks open orbital file in read_only mode
     call open_esh5_read(h5id_orbs,orbsFile)
