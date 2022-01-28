@@ -19,8 +19,6 @@ SUBROUTINE g2_kin( ik )
   USE gvecw,                ONLY : ecfixed, qcutz, q2sigma
   USE wvfct,                ONLY : g2kin
   USE wvfct_gpum,           ONLY : using_g2kin
-  USE constants,            ONLY : BOHR_RADIUS_ANGS
-  USE moire,                ONLY : lmoire, amoire
   !
   IMPLICIT NONE
   !
@@ -29,18 +27,12 @@ SUBROUTINE g2_kin( ik )
   ! ... local variables
   !
   INTEGER :: ig, npw
-  REAL(DP) :: k2pre
   !
-  if (lmoire) then
-    k2pre = tpiba2/amoire/amoire
-  else
-    k2pre = tpiba2
-  endif
   CALL using_g2kin(1)
   npw = ngk(ik)
   g2kin(1:npw) = ( ( xk(1,ik) + g(1,igk_k(1:npw,ik)) )**2 + &
                    ( xk(2,ik) + g(2,igk_k(1:npw,ik)) )**2 + &
-                   ( xk(3,ik) + g(3,igk_k(1:npw,ik)) )**2 ) * k2pre
+                   ( xk(3,ik) + g(3,igk_k(1:npw,ik)) )**2 ) * tpiba2
   !
   IF ( qcutz > 0.D0 ) THEN
      !

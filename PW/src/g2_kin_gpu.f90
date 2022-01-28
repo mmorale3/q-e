@@ -18,8 +18,6 @@ SUBROUTINE g2_kin_gpu ( ik )
   USE klist,                ONLY : xk, ngk, igk_k_d
   USE gvect,                ONLY : g_d
   USE wvfct_gpum,           ONLY : g2kin_d, using_g2kin_d
-  USE constants,            ONLY : BOHR_RADIUS_ANGS
-  USE moire,                ONLY : lmoire, amoire
   !
   IMPLICIT NONE
   !
@@ -29,13 +27,7 @@ SUBROUTINE g2_kin_gpu ( ik )
   !
   INTEGER :: ig, npw,i
   REAL(DP):: xk1,xk2,xk3
-  REAL(DP):: k2pre
   !
-  if (lmoire) then
-    k2pre = tpiba2/amoire/amoire
-  else
-    k2pre = tpiba2
-  endif
   CALL using_g2kin_d(2)
   !
   npw = ngk(ik)
@@ -48,7 +40,7 @@ SUBROUTINE g2_kin_gpu ( ik )
   DO i=1,npw
      g2kin_d(i) = ( ( xk1 + g_d(1,igk_k_d(i,ik)) )*( xk1 + g_d(1,igk_k_d(i,ik)) ) + &
                   ( xk2 + g_d(2,igk_k_d(i,ik)) )*( xk2 + g_d(2,igk_k_d(i,ik)) ) + &
-                  ( xk3 + g_d(3,igk_k_d(i,ik)) )*( xk3 + g_d(3,igk_k_d(i,ik)) ) ) * k2pre
+                  ( xk3 + g_d(3,igk_k_d(i,ik)) )*( xk3 + g_d(3,igk_k_d(i,ik)) ) ) * tpiba2
   !
   END DO
   !

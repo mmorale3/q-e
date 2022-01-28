@@ -171,8 +171,9 @@ SUBROUTINE setlocal
 END SUBROUTINE setlocal
 
 subroutine hex_shell(g6_out)
-  USE constants,         ONLY : eps8, pi, tpi
+  USE constants,         ONLY : eps6, eps8, pi, tpi
   USE cell_base,         ONLY : bg, tpiba
+  USE moire,             ONLY : amoire
   implicit none
   double precision, intent(out) :: g6_out(3,6)
   double precision :: g1(3), g6(3,6), angles(6), bmag
@@ -180,19 +181,19 @@ subroutine hex_shell(g6_out)
   integer iangs(6), ih, ib1, ib2
   g6_out(:,:) = 0.d0
 
-  ! hard-code ibrav=4 with alat=1
+  ! hard-code ibrav=4 with alat=amoire
   raxes(1,1) = 1.d0
   raxes(2,1) = 1.d0/sqrt(3.d0)
   raxes(1,2) = 0.d0
   raxes(2,2) = 2.d0/sqrt(3.d0)
-  raxes(:,:) = tpi*raxes(:,:)
+  raxes(:,:) = tpi/amoire*raxes(:,:)
   bmag = raxes(2, 2)
   ! check that raxes is related to bg by an integer tile matrix
   tmat = transpose(matmul(matinv2(tpiba*bg(1:2,1:2)), raxes))
   do ib1=1,2
   do ib2=1,2
-    if (abs(tmat(ib1,ib2)-nint(tmat(ib1,ib2))) > eps8) then
-      call errore('hex_shell', 'supercell is not tiled from ibrav=4 alat=1')
+    if (abs(tmat(ib1,ib2)-nint(tmat(ib1,ib2))) > eps6) then
+      call errore('hex_shell', 'supercell is not tiled from ibrav=4 alat=amoire', 1)
     endif
   enddo
   enddo

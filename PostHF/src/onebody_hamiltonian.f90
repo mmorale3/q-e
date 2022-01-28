@@ -57,7 +57,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP) :: ctemp
     INTEGER :: ia, ib, i0, no, error, npw,npw2
     INTEGER :: ik,ibnd, ikk, ispin
-    REAL(DP) :: fac, wm
+    REAL(DP) :: fac
     COMPLEX(DP) :: CONE, CZERO, CNORM
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
@@ -65,11 +65,6 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     !
-    if (lmoire) then
-      wm = 1.d0/amoire/amoire
-    else ! default band width
-      wm = 1.d0
-    endif
 
     CONE = (1.d0,0.d0)
     CZERO = (0.d0,0.d0)
@@ -118,8 +113,8 @@ MODULE onebody_hamiltonian
       !
       hpsi(:,:) = (0.d0,0.d0)  
       DO ibnd = 1, h5id_orbs%norbK(ik)
-        hpsi (1:npw, ibnd) = wm*tpiba2 * g2kin (1:npw) * Orbitals(1:npw,ibnd) 
-        if(noncolin) hpsi (npwx+1:npwx+npw, ibnd+h5id_orbs%norbK(ik)) = wm*tpiba2 * &
+        hpsi (1:npw, ibnd) = tpiba2 * g2kin (1:npw) * Orbitals(1:npw,ibnd) 
+        if(noncolin) hpsi (npwx+1:npwx+npw, ibnd+h5id_orbs%norbK(ik)) = tpiba2 * &
                                                 g2kin (1:npw) * Orbitals(1:npw,ibnd)
       END DO
       !
