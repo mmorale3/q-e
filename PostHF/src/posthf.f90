@@ -26,7 +26,7 @@ PROGRAM posthf
                     eha_    => eha,    &
                     vmoire_ => vmoire, &
                     pmoire_ => pmoire
-  USE constants, ONLY: autoev, bohr_radius_angs, pi
+  USE constants, ONLY: autoev, bohr_radius_angs, pi, e2
   USE KINDS, ONLY : DP
   !
   IMPLICIT NONE
@@ -203,7 +203,6 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   USE kinds, ONLY: DP
   USE ions_base, ONLY : nat, nsp, ityp, tau, zv, atm
   USE cell_base, ONLY: omega, alat, tpiba, tpiba2, at, bg
-  USE constants, ONLY: tpi, fpi, e2
   USE run_info,  ONLY: title
   USE gvect, ONLY: ngm, ngm_g, g, gstart, gg
   USE vlocal,               ONLY : strf
