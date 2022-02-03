@@ -63,7 +63,6 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
     COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
-    COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     !
 
@@ -82,7 +81,6 @@ MODULE onebody_hamiltonian
     if(okvan .or. okpaw) call reset_deeq()
 
     allocate( Orbitals(npwx, h5id_orbs%maxnorb) )
-    allocate(spsi(1,1))  ! to avoid issues in debugging mode
 
     if(noncolin) &
       allocate( evc_(npol*npwx,npol*h5id_orbs%maxnorb) )
@@ -165,29 +163,7 @@ MODULE onebody_hamiltonian
         hpsi(1,1:norb_ik) = CMPLX( DBLE( hpsi(1,1:norb_ik) ), &
                                               0.D0 ,kind=DP)
       ! H1(a,b) = 1/Ni sum_i conjg(PsiL(i,a)) * PsiR(i, b)
-      CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(1,1),npol*npwx,CZERO,H1,npol*norb_ik,.false.,spsi)
-      if(noncolin) then
-        ! (down,up)
-        CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(npwx+1,1),npol*npwx,CZERO,H1(norb_ik+1,1), &
-               npol*norb_ik,.false.,spsi)
-        ! (up,down)
-        CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(1,norb_ik+1),npol*npwx,CZERO,H1(1,norb_ik+1), &
-               npol*norb_ik,.false.,spsi)
-        ! (down,down)
-        CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(npwx+1,norb_ik+1),npol*npwx,CZERO, &
-               H1(norb_ik+1,norb_ik+1), &
-               npol*norb_ik,.false.,spsi)
-        do ia=1,2*norb_ik
-          do ib=ia+1,2*norb_ik
-            if( abs(H1(ia,ib)-conjg(H1(ib,ia))) > 1e-6 ) &
-              write(*,*)ia,ib,H1(ia,ib),H1(ib,ia)
-          enddo
-        enddo
-      endif  
+      CALL fillH1(H1, hpsi, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
 
       no = min(nmax_DM,norb_ik)
       if(present(e1)) then
@@ -258,12 +234,57 @@ MODULE onebody_hamiltonian
     end do
     
     IF( ALLOCATED(hpsi) ) DEALLOCATE (hpsi)
-    IF( ALLOCATED(spsi) ) DEALLOCATE (spsi)
     IF( ALLOCATED(evc_) ) DEALLOCATE (evc_)
     if(allocated(Orbitals)) deallocate(Orbitals)
     CALL deallocate_bec_type (becp)
  
   END SUBROUTINE getH1
+
+  subroutine fillH1(H1, hpsi, Orbitals, norb, mxorb, npw)
+    use noncollin_module, only : noncolin, npol
+    use wvfct, only: npwx
+    USE posthf_mod, ONLY: e2Ha
+    !
+    integer, intent(in) :: norb, mxorb, npw
+    complex(DP), intent(inout) :: H1(npol*norb,npol*norb)
+    complex(DP), intent(in) :: hpsi(npol*npwx, npol*mxorb)
+    complex(DP), intent(in) :: Orbitals(npwx, mxorb)
+    ! local variables
+    COMPLEX(DP) :: CZERO, CONE, CNORM
+    COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
+    integer :: ia, ib
+    !
+    CONE = (1.d0,0.d0)
+    CZERO = (0.d0,0.d0)
+    CNORM = CONE*e2Ha
+    allocate(spsi(1,1))  ! to avoid issues in debugging mode
+    !
+    CALL Overlap(norb,norb,npw,CNORM,Orbitals(1,1),npwx,&
+             hpsi(1,1),npol*npwx,CZERO,H1,npol*norb,.false.,spsi)
+    if(noncolin) then
+      ! (down,up)
+      CALL Overlap(norb,norb,npw,CNORM,Orbitals(1,1),npwx,&
+             hpsi(npwx+1,1),npol*npwx,CZERO,H1(norb+1,1), &
+             npol*norb,.false.,spsi)
+      ! (up,down)
+      CALL Overlap(norb,norb,npw,CNORM,Orbitals(1,1),npwx,&
+             hpsi(1,norb+1),npol*npwx,CZERO,H1(1,norb+1), &
+             npol*norb,.false.,spsi)
+      ! (down,down)
+      CALL Overlap(norb,norb,npw,CNORM,Orbitals(1,1),npwx,&
+             hpsi(npwx+1,norb+1),npol*npwx,CZERO, &
+             H1(norb+1,norb+1), &
+             npol*norb,.false.,spsi)
+      do ia=1,2*norb
+        do ib=ia+1,2*norb
+          if( abs(H1(ia,ib)-conjg(H1(ib,ia))) > 1e-6 ) &
+            write(*,*)ia,ib,H1(ia,ib),H1(ib,ia)
+        enddo
+      enddo
+    endif ! noncollin
+    !
+    IF( allocated(spsi) ) deallocate(spsi)
+  end subroutine fillH1
 
 END MODULE onebody_hamiltonian 
 
