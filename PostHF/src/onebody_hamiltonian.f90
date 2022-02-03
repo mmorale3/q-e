@@ -57,6 +57,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP) :: ctemp
     INTEGER :: ia, ib, i0, no, error, npw,npw2
     INTEGER :: ik,ibnd, ikk, ispin
+    INTEGER :: norb_ik
     REAL(DP) :: fac
     COMPLEX(DP) :: CONE, CZERO, CNORM
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
@@ -93,12 +94,13 @@ MODULE onebody_hamiltonian
     current_spin = 1
 
     do ik=1,nksym
+      norb_ik = h5id_orbs%norbK(ik)
       !
-      allocate( H1(npol*h5id_orbs%norbK(ik),npol*h5id_orbs%norbK(ik) ) )
+      allocate( H1(npol*norb_ik,npol*norb_ik) )
       !
       Orbitals(:,:) = CZERO  
       !  
-      call esh5_posthf_read(h5id_orbs%id,ik-1,0,h5id_orbs%norbK(ik),Orbitals,npwx,error)
+      call esh5_posthf_read(h5id_orbs%id,ik-1,0,norb_ik,Orbitals,npwx,error)
       if(error .ne. 0 ) &
         call errore('getH1','error reading additional orbital',2)
       if(gamma_only .AND. gstart == 2 ) &
@@ -112,9 +114,9 @@ MODULE onebody_hamiltonian
       ! kinetic term
       !
       hpsi(:,:) = (0.d0,0.d0)  
-      DO ibnd = 1, h5id_orbs%norbK(ik)
+      DO ibnd = 1, norb_ik
         hpsi (1:npw, ibnd) = tpiba2 * g2kin (1:npw) * Orbitals(1:npw,ibnd) 
-        if(noncolin) hpsi (npwx+1:npwx+npw, ibnd+h5id_orbs%norbK(ik)) = tpiba2 * &
+        if(noncolin) hpsi (npwx+1:npwx+npw, ibnd+norb_ik) = tpiba2 * &
                                                 g2kin (1:npw) * Orbitals(1:npw,ibnd)
       END DO
       !
@@ -124,23 +126,22 @@ MODULE onebody_hamiltonian
         !
         CALL init_us_2 (npw, igksym(1), xksym (1, ik), vkb) 
         if(noncolin) then
-          evc_(:,:) = CZERO 
-          evc_(1:npwx,1:h5id_orbs%norbK(ik)) =  Orbitals(1:npwx,1:h5id_orbs%norbK(ik))  
-          evc_(npwx+1:2*npwx,1+h5id_orbs%norbK(ik):2*h5id_orbs%norbK(ik)) = &
-                                                Orbitals(1:npwx,1:h5id_orbs%norbK(ik)) 
-          evc_(npwx+1:2*npwx,1:h5id_orbs%norbK(ik)) = CZERO
-          evc_(1:npwx,1+h5id_orbs%norbK(ik):2*h5id_orbs%norbK(ik)) = CZERO 
-          call calbec(npw, vkb, evc_(:,1:2*h5id_orbs%norbK(ik)), becp, 2*h5id_orbs%norbK(ik))
+          evc_(:,:) = CZERO
+          evc_(1:npwx,1:norb_ik) =  Orbitals(1:npwx,1:norb_ik)
+          evc_(npwx+1:2*npwx,1+norb_ik:2*norb_ik) = Orbitals(1:npwx,1:norb_ik)
+          evc_(npwx+1:2*npwx,1:norb_ik) = CZERO
+          evc_(1:npwx,1+norb_ik:2*norb_ik) = CZERO
+          call calbec(npw, vkb, evc_(:,1:2*norb_ik), becp, 2*norb_ik)
         else
-          CALL calbec(npw, vkb, Orbitals(:,1:h5id_orbs%norbK(ik)), becp, h5id_orbs%norbK(ik) )
+          CALL calbec(npw, vkb, Orbitals(:,1:norb_ik), becp, norb_ik )
         endif
-        CALL add_vuspsi( npwx, npw, npol*h5id_orbs%norbK(ik), hpsi )
+        CALL add_vuspsi( npwx, npw, npol*norb_ik, hpsi )
         !
       END IF
       !
       ! local potential
       !
-      do ibnd=1,h5id_orbs%norbK(ik)
+      do ibnd=1,norb_ik
         !
         psic (:) = (0.d0,0.d0)
         psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npw,ibnd)
@@ -155,43 +156,43 @@ MODULE onebody_hamiltonian
         !
         hpsi (1:npw, ibnd) = hpsi (1:npw, ibnd) + psic (dfft%nl(igksym(1:npw)))
         if(noncolin) & 
-          hpsi (npwx+1:npwx+npw, ibnd+h5id_orbs%norbK(ik)) = &  
-                                hpsi (npwx+1:npwx+npw, ibnd+h5id_orbs%norbK(ik)) + &
+          hpsi (npwx+1:npwx+npw, ibnd+norb_ik) = &  
+                                hpsi (npwx+1:npwx+npw, ibnd+norb_ik) + &
                                 psic (dfft%nl(igksym(1:npw))) 
         !
       enddo
       if(gamma_only .AND. gstart == 2 ) & 
-        hpsi(1,1:h5id_orbs%norbK(ik)) = CMPLX( DBLE( hpsi(1,1:h5id_orbs%norbK(ik)) ), &
+        hpsi(1,1:norb_ik) = CMPLX( DBLE( hpsi(1,1:norb_ik) ), &
                                               0.D0 ,kind=DP)
       ! H1(a,b) = 1/Ni sum_i conjg(PsiL(i,a)) * PsiR(i, b)
-      CALL Overlap(h5id_orbs%norbK(ik),h5id_orbs%norbK(ik),npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(1,1),npol*npwx,CZERO,H1,npol*h5id_orbs%norbK(ik),.false.,spsi)
+      CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
+               hpsi(1,1),npol*npwx,CZERO,H1,npol*norb_ik,.false.,spsi)
       if(noncolin) then
         ! (down,up)
-        CALL Overlap(h5id_orbs%norbK(ik),h5id_orbs%norbK(ik),npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(npwx+1,1),npol*npwx,CZERO,H1(h5id_orbs%norbK(ik)+1,1), &
-               npol*h5id_orbs%norbK(ik),.false.,spsi)
+        CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
+               hpsi(npwx+1,1),npol*npwx,CZERO,H1(norb_ik+1,1), &
+               npol*norb_ik,.false.,spsi)
         ! (up,down)
-        CALL Overlap(h5id_orbs%norbK(ik),h5id_orbs%norbK(ik),npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(1,h5id_orbs%norbK(ik)+1),npol*npwx,CZERO,H1(1,h5id_orbs%norbK(ik)+1), &
-               npol*h5id_orbs%norbK(ik),.false.,spsi)
+        CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
+               hpsi(1,norb_ik+1),npol*npwx,CZERO,H1(1,norb_ik+1), &
+               npol*norb_ik,.false.,spsi)
         ! (down,down)
-        CALL Overlap(h5id_orbs%norbK(ik),h5id_orbs%norbK(ik),npw,CNORM,Orbitals(1,1),npwx,&
-               hpsi(npwx+1,h5id_orbs%norbK(ik)+1),npol*npwx,CZERO, &
-               H1(h5id_orbs%norbK(ik)+1,h5id_orbs%norbK(ik)+1), &
-               npol*h5id_orbs%norbK(ik),.false.,spsi)
-        do ia=1,2*h5id_orbs%norbK(ik)
-          do ib=ia+1,2*h5id_orbs%norbK(ik)
+        CALL Overlap(norb_ik,norb_ik,npw,CNORM,Orbitals(1,1),npwx,&
+               hpsi(npwx+1,norb_ik+1),npol*npwx,CZERO, &
+               H1(norb_ik+1,norb_ik+1), &
+               npol*norb_ik,.false.,spsi)
+        do ia=1,2*norb_ik
+          do ib=ia+1,2*norb_ik
             if( abs(H1(ia,ib)-conjg(H1(ib,ia))) > 1e-6 ) &
               write(*,*)ia,ib,H1(ia,ib),H1(ib,ia)
           enddo
         enddo
       endif  
 
-      no = min(nmax_DM,h5id_orbs%norbK(ik))
+      no = min(nmax_DM,norb_ik)
       if(present(e1)) then
         do ispin=1,min(2,nspin)
-          i0 = (ispin-1)*(npol-1)*h5id_orbs%norbK(ik)
+          i0 = (ispin-1)*(npol-1)*norb_ik
           do ib=1,no
             do ia=1,no
               e1 = e1 + fac*H1(ia+i0,ib+i0)*DM(ia,ib,ik,ispin)
@@ -201,7 +202,7 @@ MODULE onebody_hamiltonian
       endif
       if(present(e1_mf)) then
         do ispin=1,min(2,nspin)
-          i0 = (ispin-1)*(npol-1)*h5id_orbs%norbK(ik)
+          i0 = (ispin-1)*(npol-1)*norb_ik
           do ib=1,no
             do ia=1,no
               e1_mf = e1_mf + fac*H1(ia+i0,ib+i0)*DM_mf(ia,ib,ik,ispin)
@@ -213,12 +214,12 @@ MODULE onebody_hamiltonian
         if(noncolin) then
           do ib=1,no
             do ia=1,no
-              e1_so = e1_so + fac*H1(ia,ib+h5id_orbs%norbK(ik))*DM(ia,ib,ik,3)
+              e1_so = e1_so + fac*H1(ia,ib+norb_ik)*DM(ia,ib,ik,3)
             enddo
           enddo
           do ib=1,no
             do ia=1,no
-              e1_so = e1_so + fac*H1(ia+h5id_orbs%norbK(ik),ib)*DM(ia,ib,ik,4)
+              e1_so = e1_so + fac*H1(ia+norb_ik,ib)*DM(ia,ib,ik,4)
             enddo
           enddo
         endif
@@ -227,12 +228,12 @@ MODULE onebody_hamiltonian
         if(noncolin) then
           do ib=1,no
             do ia=1,no
-              e1_so_mf = e1_so_mf + fac*H1(ia,ib+h5id_orbs%norbK(ik))*DM_mf(ia,ib,ik,3)
+              e1_so_mf = e1_so_mf + fac*H1(ia,ib+norb_ik)*DM_mf(ia,ib,ik,3)
             enddo
           enddo
           do ib=1,no
             do ia=1,no
-              e1_so_mf = e1_so_mf + fac*H1(ia+h5id_orbs%norbK(ik),ib)*DM_mf(ia,ib,ik,4)
+              e1_so_mf = e1_so_mf + fac*H1(ia+norb_ik,ib)*DM_mf(ia,ib,ik,4)
             enddo
           enddo
         endif
@@ -240,8 +241,8 @@ MODULE onebody_hamiltonian
 
       ! collect on head node!
       ! transpose to account for expected row major format in esh5  
-      do ia=1,npol*h5id_orbs%norbK(ik) 
-        do ib=ia+1,npol*h5id_orbs%norbK(ik) 
+      do ia=1,npol*norb_ik
+        do ib=ia+1,npol*norb_ik
           ctemp = H1(ia,ib)
           H1(ia,ib) = H1(ib,ia)
           H1(ib,ia) = ctemp 
@@ -250,7 +251,7 @@ MODULE onebody_hamiltonian
       !
 601   CONTINUE
       !
-      CALL esh5_posthf_write_h1(h5id_hamil%id,npol*h5id_orbs%norbK(ik),ik,H1)
+      CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik,H1)
       !
       deallocate(H1)  
       !
