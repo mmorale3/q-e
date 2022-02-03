@@ -51,7 +51,7 @@ SUBROUTINE electrons()
   !
   USE wvfct_gpum,           ONLY : using_et, using_wg, using_wg_d
   USE scf_gpum,             ONLY : using_vrs
-  USE input_parameters,     ONLY : extra_cycle, write_exx_restart
+  USE input_parameters,     ONLY : extra_cycle, write_exx_restart, lob
   !
   IMPLICIT NONE
   !
@@ -60,6 +60,8 @@ SUBROUTINE electrons()
   REAL(DP) :: charge
   !! the total charge
   REAL(DP) :: exxen
+  !! 1-body energy
+  REAL(DP) :: e1b
   !! used to compute exchange energy
   REAL(DP), EXTERNAL :: exxenergyace
   INTEGER :: idum
@@ -286,7 +288,9 @@ SUBROUTINE electrons()
            if (extra_cycle) then
              printout = 2
              call electrons_scf(printout, exxen)
-             write( stdout, 9069 ) (eband+deband-2*exxen)/2.d0
+             e1b = eband
+             if (.not.lob) e1b = e1b+deband-2*exxen
+             write( stdout, 9069 ) e1b/2.d0
              write( stdout, 9070 ) ehart/2.d0
              write( stdout, 9071 ) exxen/2.d0
            endif
