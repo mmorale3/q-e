@@ -19,7 +19,7 @@ MODULE onebody_hamiltonian
   ! Calculate and print one body hamiltonian
   !
   !-----------------------------------------------------------------------
-  SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf)
+  SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf,tkin)
     USE scf,      ONLY: vltot
     USE wvfct, ONLY: npwx, g2kin
     USE wavefunctions, ONLY : psic
@@ -46,7 +46,7 @@ MODULE onebody_hamiltonian
     !
     TYPE(h5file_type), INTENT(IN) :: h5id_hamil,h5id_orbs
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
-    COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1,e1_so
+    COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1,e1_so,tkin
     COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1_mf,e1_so_mf
     !
     COMPLEX(DP) :: ctemp
@@ -65,6 +65,7 @@ MODULE onebody_hamiltonian
     if(present(e1_so)) e1_so = CZERO
     if(present(e1_mf)) e1_mf = CZERO
     if(present(e1_so_mf)) e1_so_mf = CZERO
+    if(present(tkin)) tkin = CZERO
 
     ! if paw/uspp, kill Hxc terms 
     ! these (Hartree/EXX) are added in the 2-body part 
@@ -83,6 +84,7 @@ MODULE onebody_hamiltonian
 
     do ik=1,nksym
       norb_ik = h5id_orbs%norbK(ik)
+      no = min(nmax_DM,norb_ik)
       !
       allocate( H1(npol*norb_ik,npol*norb_ik) )
       !
@@ -107,6 +109,14 @@ MODULE onebody_hamiltonian
         if(noncolin) hpsi (npwx+1:npwx+npw, ibnd+norb_ik) = tpiba2 * &
                                                 g2kin (1:npw) * Orbitals(1:npw,ibnd)
       END DO
+      ! kinetic energy
+      if(present(tkin)) then
+        CALL fillH1(H1, hpsi, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
+        do ispin=1,min(2,nspin)
+          i0 = (ispin-1)*(npol-1)*norb_ik
+          tkin = tkin + onebody_energy(H1,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
+        enddo
+      endif
       !
       ! VNL: non local contribution
       !
@@ -155,7 +165,6 @@ MODULE onebody_hamiltonian
       ! H1(a,b) = 1/Ni sum_i conjg(PsiL(i,a)) * PsiR(i, b)
       CALL fillH1(H1, hpsi, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
 
-      no = min(nmax_DM,norb_ik)
       if(present(e1)) then
         do ispin=1,min(2,nspin)
           i0 = (ispin-1)*(npol-1)*norb_ik
@@ -170,13 +179,17 @@ MODULE onebody_hamiltonian
       endif
       if(present(e1_so)) then
         if(noncolin) then
+          ! (up,down)
           e1_so = e1_so + onebody_energy(H1,DM(:,:,ik,3),0,norb_ik,norb_ik,nmax_DM)
+          ! (down,up)
           e1_so = e1_so + onebody_energy(H1,DM(:,:,ik,3),norb_ik,0,norb_ik,nmax_DM)
         endif
       endif
       if(present(e1_so_mf)) then
         if(noncolin) then
+          ! (up,down)
           e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,3),0,norb_ik,norb_ik,nmax_DM)
+          ! (down,up)
           e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,3),norb_ik,0,norb_ik,nmax_DM)
         endif
       endif
