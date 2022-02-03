@@ -272,7 +272,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   INTEGER :: i, nxxs, maxnorb, nelmax
   COMPLEX(DP), ALLOCATABLE :: M(:,:,:,:)  ! Overlap between basis states and
                                             ! occupied KS states. 
-  COMPLEX(DP) :: e1,e1_so,e1_mf,e1_so_mf,emp2,erpa
+  COMPLEX(DP) :: e1,e1_so,e1_mf,e1_so_mf,emp2,erpa,tkin
   TYPE(h5file_type) :: h5id_input_orbs, h5id_output_orbs, h5id_hamil
 ! **********************************************************************
 
@@ -369,7 +369,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
   
       ! calculate and write 1 body hamiltonian
       ! make DM and optional argument to H1
-      CALL getH1(h5id_input_orbs,h5id_hamil,dffts,e1,e1_so,e1_mf,e1_so_mf)
+      CALL getH1(h5id_input_orbs,h5id_hamil,dffts,e1,e1_so,e1_mf,e1_so_mf,tkin)
 
       CALL esh5_posthf_close_file(h5id_hamil%id)
       call close_esh5_read(h5id_input_orbs)
@@ -392,6 +392,7 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
         call errore('posthf','error writing DM_mf',1)
       write(*,*) 'E0, E1(1Det), E_SO(1Det) (Ha):',e0,e1/(nkfull*1.0),e1_so/(nkfull*1.0)
       write(*,*) '    E1, E_SO (Ha):',e1_mf/(nkfull*1.0),e1_so_mf/(nkfull*1.0)
+      write(*,*) ' kinetic (Ha):', tkin
 
 
       CALL esh5_posthf_close_file(h5id_hamil%id)
