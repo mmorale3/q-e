@@ -21,10 +21,10 @@ MODULE onebody_hamiltonian
   !-----------------------------------------------------------------------
   SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf)
     USE scf,      ONLY: vltot
-    USE wvfct, ONLY: nbnd, npwx, g2kin
+    USE wvfct, ONLY: npwx, g2kin
     USE wavefunctions, ONLY : psic
     USE cell_base, ONLY: tpiba2
-    USE becmod,   ONLY : bec_type,becp, calbec, allocate_bec_type, deallocate_bec_type
+    USE becmod,   ONLY : becp, calbec, allocate_bec_type, deallocate_bec_type
     USE noncollin_module,     ONLY : noncolin, npol
     USE control_flags, ONLY : gamma_only
     USE gvect, ONLY: ngm, g, gstart
@@ -38,12 +38,9 @@ MODULE onebody_hamiltonian
     USE uspp,       ONLY : okvan    
     use fft_interfaces,       ONLY : invfft, fwfft
     USE fft_types, ONLY: fft_type_descriptor
-    USE posthf_mod, ONLY: nksym, nkfull, xkfull, xksym, &
-                        igksym, ngksym,e2Ha, nmax_DM, DM, DM_mf
-    USE orbital_generators, ONLY: mixed_basis
+    USE posthf_mod, ONLY: nksym, xksym, igksym
+    USE posthf_mod, ONLY: nmax_DM, DM, DM_mf
     USE read_orbitals_from_file, ONLY: h5file_type
-    USE constants, ONLY: BOHR_RADIUS_ANGS
-    USE moire, ONLY: lmoire, amoire
     !
     IMPLICIT NONE
     !
@@ -53,22 +50,17 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1_mf,e1_so_mf
     !
     COMPLEX(DP) :: ctemp
-    INTEGER :: ia, ib, i0, no, error, npw,npw2
-    INTEGER :: ik,ibnd, ikk, ispin
+    INTEGER :: ia, ib, i0, no, error, npw
+    INTEGER :: ik,ibnd,ispin
     INTEGER :: norb_ik
-    COMPLEX(DP) :: CONE, CZERO, CNORM
+    COMPLEX(DP) :: CZERO
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
     COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
-    real(DP) :: fac
-    fac=1.d0
-    if(nspin==1) fac=2.d0
     !
 
-    CONE = (1.d0,0.d0)
     CZERO = (0.d0,0.d0)
-    CNORM = CONE*e2Ha 
     if(present(e1)) e1 = CZERO
     if(present(e1_so)) e1_so = CZERO
     if(present(e1_mf)) e1_mf = CZERO
