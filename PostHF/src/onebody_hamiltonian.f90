@@ -21,17 +21,15 @@ MODULE onebody_hamiltonian
   !-----------------------------------------------------------------------
   SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf)
     USE scf,      ONLY: vltot
-    USE wvfct, ONLY: nbnd, npwx, current_k, g2kin
+    USE wvfct, ONLY: nbnd, npwx, g2kin
     USE wavefunctions, ONLY : psic
-    USE io_global, ONLY: stdout, ionode,  ionode_id
     USE cell_base, ONLY: tpiba2
     USE becmod,   ONLY : bec_type,becp, calbec, allocate_bec_type, deallocate_bec_type
     USE noncollin_module,     ONLY : noncolin, npol
     USE control_flags, ONLY : gamma_only
     USE gvect, ONLY: ngm, g, gstart
     USE gvecw, ONLY : ecutwfc
-    USE io_files, ONLY: nwordwfc, iunwfc, tmp_dir, prefix
-    USE lsda_mod, ONLY: lsda, nspin
+    USE lsda_mod, ONLY: nspin
     USE uspp,     ONLY : vkb, nkb
     USE realus,   ONLY : real_space
     USE wavefunctions, ONLY : evc
@@ -58,19 +56,19 @@ MODULE onebody_hamiltonian
     INTEGER :: ia, ib, i0, no, error, npw,npw2
     INTEGER :: ik,ibnd, ikk, ispin
     INTEGER :: norb_ik
-    REAL(DP) :: fac
     COMPLEX(DP) :: CONE, CZERO, CNORM
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
     COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
+    real(DP) :: fac
+    fac=1.d0
+    if(nspin==1) fac=2.d0
     !
 
     CONE = (1.d0,0.d0)
     CZERO = (0.d0,0.d0)
     CNORM = CONE*e2Ha 
-    fac=1.d0
-    if(nspin==1) fac=2.d0
     if(present(e1)) e1 = CZERO
     if(present(e1_so)) e1_so = CZERO
     if(present(e1_mf)) e1_mf = CZERO
@@ -169,49 +167,25 @@ MODULE onebody_hamiltonian
       if(present(e1)) then
         do ispin=1,min(2,nspin)
           i0 = (ispin-1)*(npol-1)*norb_ik
-          do ib=1,no
-            do ia=1,no
-              e1 = e1 + fac*H1(ia+i0,ib+i0)*DM(ia,ib,ik,ispin)
-            enddo
-          enddo
+          e1 = e1 + onebody_energy(H1,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
         enddo
       endif
       if(present(e1_mf)) then
         do ispin=1,min(2,nspin)
           i0 = (ispin-1)*(npol-1)*norb_ik
-          do ib=1,no
-            do ia=1,no
-              e1_mf = e1_mf + fac*H1(ia+i0,ib+i0)*DM_mf(ia,ib,ik,ispin)
-            enddo
-          enddo
+          e1_mf = e1_mf + onebody_energy(H1,DM_mf(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
         enddo
       endif
       if(present(e1_so)) then
         if(noncolin) then
-          do ib=1,no
-            do ia=1,no
-              e1_so = e1_so + fac*H1(ia,ib+norb_ik)*DM(ia,ib,ik,3)
-            enddo
-          enddo
-          do ib=1,no
-            do ia=1,no
-              e1_so = e1_so + fac*H1(ia+norb_ik,ib)*DM(ia,ib,ik,4)
-            enddo
-          enddo
+          e1_so = e1_so + onebody_energy(H1,DM(:,:,ik,3),0,norb_ik,norb_ik,nmax_DM)
+          e1_so = e1_so + onebody_energy(H1,DM(:,:,ik,3),norb_ik,0,norb_ik,nmax_DM)
         endif
       endif
       if(present(e1_so_mf)) then
         if(noncolin) then
-          do ib=1,no
-            do ia=1,no
-              e1_so_mf = e1_so_mf + fac*H1(ia,ib+norb_ik)*DM_mf(ia,ib,ik,3)
-            enddo
-          enddo
-          do ib=1,no
-            do ia=1,no
-              e1_so_mf = e1_so_mf + fac*H1(ia+norb_ik,ib)*DM_mf(ia,ib,ik,4)
-            enddo
-          enddo
+          e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,3),0,norb_ik,norb_ik,nmax_DM)
+          e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,3),norb_ik,0,norb_ik,nmax_DM)
         endif
       endif
 
@@ -285,6 +259,28 @@ MODULE onebody_hamiltonian
     !
     IF( allocated(spsi) ) deallocate(spsi)
   end subroutine fillH1
+
+  pure complex(DP) function onebody_energy(h1, dm, ia0, ib0, norb, nmax)
+    use noncollin_module, only : noncolin, npol
+    USE lsda_mod, ONLY: nspin
+    !
+    complex(DP), intent(in) :: h1(npol*norb,npol*norb)
+    complex(DP), intent(in) :: dm(nmax,nmax)
+    integer, intent(in) :: ia0, ib0, norb, nmax
+    ! local variables
+    integer :: no, ia, ib
+    real(DP) :: fac
+    fac=1.d0
+    if(nspin==1) fac=2.d0
+    no = min(nmax,norb)
+    !
+    onebody_energy = (0.d0, 0.d0)
+    do ib=1,no
+      do ia=1,no
+        onebody_energy = onebody_energy + fac*h1(ia+ia0,ib+ib0)*dm(ia,ib)
+      enddo
+    enddo
+  end function
 
 END MODULE onebody_hamiltonian 
 
