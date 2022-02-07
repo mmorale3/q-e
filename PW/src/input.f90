@@ -1003,6 +1003,10 @@ SUBROUTINE iosys()
      !
      isolve = 3
      !
+  CASE ( 'subrot' )
+     !
+     isolve = 10
+     !
   CASE DEFAULT
      !
      CALL errore( 'iosys', 'diagonalization ' // &

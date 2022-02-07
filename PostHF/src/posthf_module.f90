@@ -112,7 +112,7 @@ MODULE posthf_mod
     if(ionode) call print_freemem()
     e2Ha = 1.d0/e2
     norb = norb_
-    if(norb .le. 0) norb=nbnd
+    if(norb .lt. 0) norb=nbnd
     if(norb .gt. nbnd) then
       write(*,*) 'WARNING: Requesting too many orbitals: ',norb
       write(*,*) 'Setting number_of_orbitals to number of orbitals in file:',nbnd

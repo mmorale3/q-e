@@ -303,6 +303,7 @@ MODULE read_orbitals_from_file
   !-----------------------------------------------------------------------
     !
     USE fft_interfaces,  ONLY : invfft
+    USE wvfct,           ONLY : nbnd
     !
     IMPLICIT NONE
     !
@@ -355,7 +356,7 @@ MODULE read_orbitals_from_file
     !
     do ibnd=1,nbands
       !
-      if( b_beg+ibnd-1 > norb ) cycle 
+      if( b_beg+ibnd-1 > nbnd ) cycle 
       !
       if( trim(orbtype) .eq. 'psir' ) then
         !

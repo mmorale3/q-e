@@ -73,7 +73,7 @@ PROGRAM posthf
   out_prefix = 'pwscf'
   write_psir = .false.
   expand_kp = .false.
-  number_of_orbitals = 0
+  number_of_orbitals = -1
   ndet=1
   ncholmax=15.d0
   thresh=1.d-5

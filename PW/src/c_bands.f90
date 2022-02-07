@@ -76,6 +76,8 @@ SUBROUTINE c_bands( iter )
      WRITE( stdout, '(5X,"PPCG style diagonalization")')
   ELSEIF ( isolve == 3 ) THEN
      WRITE( stdout, '(5X,"ParO style diagonalization")')
+  ELSEIF ( isolve == 10 ) THEN
+     WRITE( stdout, '(5X," Diagonalization by subspace rotations in a fixed space. ")')
   ELSE
      CALL errore ( 'c_bands', 'invalid type of diagonalization', isolve)
   ENDIF
@@ -324,7 +326,24 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
     !
     INTEGER :: j
     !
-    IF ( isolve == 1 .OR. isolve == 2 .OR. isolve == 3) THEN
+    IF ( isolve == 10 ) THEN
+       !
+       ! ... Subspace rotation ... 
+       !
+       IF (.not. use_gpu) THEN
+           CALL using_evc(1);  CALL using_et(1);
+           CALL rotate_wfc ( npwx, npw, nbnd, gstart, nbnd, evc, npol, okvan, &
+                         evc, et(1,ik) )
+       ELSE
+           CALL using_evc_d(1);  CALL using_et_d(1);
+           CALL rotate_wfc_gpu( npwx, npw, nbnd, gstart, nbnd, evc_d, npol, &
+                        okvan, evc, et_d(1,ik) )
+       ENDIF
+       !
+       notconv = 0
+       avg_iter = avg_iter + 1.D0
+       !
+    ELSEIF ( isolve == 1 .OR. isolve == 2 .OR. isolve == 3) THEN
        !
        ! ... (Projected Preconditioned) Conjugate-Gradient diagonalization
        !
@@ -558,7 +577,17 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
     ENDIF
     !
     !write (*,*) ' current isolve value ( 0 Davidson, 1 CG, 2 PPCG)', isolve; FLUSH(6)
-    IF ( isolve == 1 .OR. isolve == 2 .OR. isolve == 3 ) THEN
+    IF ( isolve == 10 ) THEN
+       !
+       ! ... Subspace rotation ... 
+       !
+       CALL rotate_wfc ( npwx, npw, nbnd, gstart, nbnd, evc, npol, okvan, &
+                         evc, et(1,ik) )
+       !
+       notconv = 0
+       avg_iter = avg_iter + 1.D0
+       !
+    ELSEIF ( isolve == 1 .OR. isolve == 2 .OR. isolve == 3 ) THEN
        !
        ! ... (Projected Preconditioned) Conjugate-Gradient diagonalization
        !
