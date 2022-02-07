@@ -850,6 +850,8 @@ MODULE read_namelists_module
        CALL mp_bcast( pmoire_in_deg,     ionode_id, intra_image_comm )
        CALL mp_bcast( mstar,             ionode_id, intra_image_comm )
        CALL mp_bcast( epsmoire,          ionode_id, intra_image_comm )
+       CALL mp_bcast( vh_scale,          ionode_id, intra_image_comm )
+       CALL mp_bcast( vx_scale,          ionode_id, intra_image_comm )
 
        ! ... EXX
 
