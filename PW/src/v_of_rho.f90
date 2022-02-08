@@ -524,7 +524,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   USE martyna_tuckerman, ONLY : wg_corr_h, do_comp_mt
   USE esm,               ONLY : do_comp_esm, esm_hartree, esm_bc
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_2D, cutoff_hartree  
-  USE moire,             ONLY : lmoire
+  USE moire,             ONLY : lmoire, vh_scale
   !
   IMPLICIT NONE
   !
@@ -597,7 +597,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
      ENDIF
      !
      if (lmoire) then
-     fac = e2 * tpi / tpiba * at(3, 3)*alat
+     fac = vh_scale * e2 * tpi / tpiba * at(3, 3)*alat
      else
      fac = e2 * fpi / tpiba2
      endif ! lmoire

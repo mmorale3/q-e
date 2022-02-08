@@ -492,6 +492,10 @@ MODULE moire
   !! moire potential depth in eha
   REAL(DP) :: pmoire = 0.0_dp
   !! moire potential shape in radian
+  REAL(DP) :: vh_scale = 1.0_dp
+  !! variational scaling factor in front of hartree potential
+  REAL(DP) :: vx_scale = 1.0_dp
+  !! variational scaling factor in front of exchange potential
   !
 END MODULE moire
 !

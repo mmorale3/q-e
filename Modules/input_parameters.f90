@@ -653,6 +653,12 @@ MODULE input_parameters
         REAL(DP) :: mstar = 1.d0
         !! effective mass of electrons in lowest band
         !
+        REAL(DP) :: vh_scale = 1.d0
+        !! variational scaling factor in front of hartree potential
+        !
+        REAL(DP) :: vx_scale = 1.d0
+        !! variational scaling factor in front of exchange potential
+        !
 
 
         NAMELIST / system / ibrav, celldm, a, b, c, cosab, cosac, cosbc, nat, &
@@ -689,7 +695,7 @@ MODULE input_parameters
              space_group, uniqueb, origin_choice, rhombohedral,               &
              zgate, relaxz, block, block_1, block_2, block_height,            &
              lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar,      &
-             epsmoire
+             epsmoire, vh_scale, vx_scale
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters
