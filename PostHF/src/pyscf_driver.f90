@@ -661,7 +661,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
                                             ! occupied KS states. 
   CHARACTER(len=256) :: out_prefix, h5_add_orbs, h5qeorbs
   CHARACTER(len=256) :: hamilFile,orbsFile,canOrbsFile
-  COMPLEX(DP) :: e1, e1_so, e2_mp2, e2_rpa, e1_mf, e1_so_mf
+  COMPLEX(DP) :: e1, e1_so, e2_mp2, e2_rpa, e1_mf, e1_so_mf, tkin
   TYPE(h5file_type) :: h5id_hamil,h5id_orbs
   REAL(DP) :: occeigcut  
 
@@ -682,6 +682,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
   e1_mf=(0.d0,0.d0) 
   e1_so_mf=(0.d0,0.d0)  
   e2_mp2=(0.d0,0.d0) 
+  tkin=(0.d0,0.d0)
   !
   if(npool > 1) call davcio_to_esh5(h5qeorbs,norb,dffts)
   !
@@ -721,7 +722,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
 
     ! calculate and write 1 body hamiltonian
     ! make DM and optional argument to H1
-    CALL getH1(h5id_orbs,h5id_hamil,dffts,e1,e1_so,e1_mf,e1_so_mf)
+    CALL getH1(h5id_orbs,h5id_hamil,dffts,e1,e1_so,e1_mf,e1_so_mf,tkin)
 
     CALL esh5_posthf_close_file(h5id_hamil%id)
     call close_esh5_read(h5id_orbs)
@@ -743,6 +744,7 @@ subroutine pyscf_driver_hamil(out_prefix_, nread_from_h5, h5_add_orbs_, &
 
     write(*,*) 'E0, E1(1Det),E_SO(1Det) (Ha):',e0,e1/(nksym*1.0d0),e1_so/(nksym*1.0d0)
     write(*,*) '    E1,E_SO (Ha):',e1_mf/(nksym*1.0),e1_so_mf/(nksym*1.0)
+    write(*,*) '    kinetic (Ha):',tkin/(nksym*1.0)
 
     CALL esh5_posthf_close_file(h5id_hamil%id)
     if(allocated(M)) deallocate(M)
