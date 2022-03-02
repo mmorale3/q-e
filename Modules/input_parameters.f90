@@ -659,6 +659,9 @@ MODULE input_parameters
         REAL(DP) :: vx_scale = 1.d0
         !! variational scaling factor in front of exchange potential
         !
+        INTEGER :: no_constrain_type = -1
+        !! remove magnetic constraint for atoms of this type
+        !
 
 
         NAMELIST / system / ibrav, celldm, a, b, c, cosab, cosac, cosbc, nat, &
@@ -695,7 +698,7 @@ MODULE input_parameters
              space_group, uniqueb, origin_choice, rhombohedral,               &
              zgate, relaxz, block, block_1, block_2, block_height,            &
              lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar,      &
-             epsmoire, vh_scale, vx_scale
+             epsmoire, vh_scale, vx_scale, no_constrain_type
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters

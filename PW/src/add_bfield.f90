@@ -33,6 +33,7 @@ SUBROUTINE add_bfield( v, rho )
   USE mp,               ONLY : mp_sum
   USE noncollin_module, ONLY : bfield, lambda, i_cons, mcons, &
                                pointlist, factlist, noncolin
+  USE input_parameters, ONLY : no_constrain_type
   !
   IMPLICIT NONE
   !
@@ -68,6 +69,9 @@ SUBROUTINE add_bfield( v, rho )
      DO na = 1, nat
         !
         nt = ityp(na)
+        if (nt.eq.no_constrain_type) then
+          continue
+        endif
         !
         IF (i_cons==1) THEN
            !
