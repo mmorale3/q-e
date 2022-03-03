@@ -70,7 +70,8 @@ SUBROUTINE add_bfield( v, rho )
         !
         nt = ityp(na)
         if (nt.eq.no_constrain_type) then
-          continue
+          m2(1:npol,na) = 0.d0
+          cycle
         endif
         !
         IF (i_cons==1) THEN
