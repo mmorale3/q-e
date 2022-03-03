@@ -71,6 +71,7 @@ SUBROUTINE add_bfield( v, rho )
         nt = ityp(na)
         if (nt.eq.no_constrain_type) then
           m2(1:npol,na) = 0.d0
+          !m2(1:npol,na) = m_loc(1:npol,na)
           cycle
         endif
         !

@@ -158,7 +158,7 @@ SUBROUTINE make_pointlists
      ! distance divided by 2*1.2 (so no point in space can belong to more
      ! than one atom)
      if (lmoire) then
-        r_m(nt) = amoire_alat/2.2d0/alat  ! r_m should be in alat units
+        r_m(nt) = 0.5d0*amoire_alat/1.2d0 * 0.99d0/alat  ! r_m should be in alat units
      else
         r_m(nt) = 0.5d0*distmin(nt)/1.2d0 * 0.99d0
      endif ! lmoire
