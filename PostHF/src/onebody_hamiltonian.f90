@@ -20,13 +20,13 @@ MODULE onebody_hamiltonian
   !
   !-----------------------------------------------------------------------
   SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf,tkin)
-    USE scf,      ONLY: vltot
+    USE scf, ONLY: vltot, rho, v
     USE wvfct, ONLY: npwx, g2kin
     USE wavefunctions, ONLY : psic
     USE cell_base, ONLY: tpiba2
     USE becmod,   ONLY : becp, calbec, allocate_bec_type, deallocate_bec_type
     USE noncollin_module,     ONLY : noncolin, npol,\
-      pointlist, factlist
+      pointlist, factlist, i_cons, lambda, mcons
     USE control_flags, ONLY : gamma_only
     USE gvect, ONLY: ngm, g, gstart
     USE gvecw, ONLY : ecutwfc
@@ -87,6 +87,17 @@ MODULE onebody_hamiltonian
     ALLOCATE( pointlist(dfft%nnr) )
     ALLOCATE( factlist(dfft%nnr)  )
     CALL make_pointlists()
+    ! magnetic field
+    if (i_cons == 0) then
+      print*, 'no magnetic constraint'
+    elseif (i_cons == 1) then ! modify
+      print*, 'i_cons == 1'
+      v%of_r(:, :) = 0.d0
+      CALL add_bfield( v%of_r, rho%of_r )
+    else
+      print*, 'i_cons', i_cons, 'not implemented'
+      stop
+    endif
 
     do ik=1,nksym
       norb_ik = h5id_orbs%norbK(ik)
