@@ -25,7 +25,8 @@ MODULE onebody_hamiltonian
     USE wavefunctions, ONLY : psic
     USE cell_base, ONLY: tpiba2
     USE becmod,   ONLY : becp, calbec, allocate_bec_type, deallocate_bec_type
-    USE noncollin_module,     ONLY : noncolin, npol
+    USE noncollin_module,     ONLY : noncolin, npol,\
+      pointlist, factlist
     USE control_flags, ONLY : gamma_only
     USE gvect, ONLY: ngm, g, gstart
     USE gvecw, ONLY : ecutwfc
@@ -81,6 +82,11 @@ MODULE onebody_hamiltonian
 
     ! set spin, only spin = 1 is used
     current_spin = 1
+
+    ! partition real-space FFT grid among lattice sites
+    ALLOCATE( pointlist(dfft%nnr) )
+    ALLOCATE( factlist(dfft%nnr)  )
+    CALL make_pointlists()
 
     do ik=1,nksym
       norb_ik = h5id_orbs%norbK(ik)
@@ -216,6 +222,8 @@ MODULE onebody_hamiltonian
     IF( ALLOCATED(evc_) ) DEALLOCATE (evc_)
     if(allocated(Orbitals)) deallocate(Orbitals)
     CALL deallocate_bec_type (becp)
+    if( allocated(pointlist) ) deallocate( pointlist )
+    if( allocated(factlist) ) deallocate( factlist )
  
   END SUBROUTINE getH1
 
