@@ -90,13 +90,12 @@ MODULE onebody_hamiltonian
     ! magnetic field
     if (i_cons == 0) then
       print*, 'no magnetic constraint'
-    elseif (i_cons == 1) then ! modify
-      print*, 'i_cons == 1'
+    elseif (i_cons == 1) then
+      print*, 'atomic magnetic constraints'
       v%of_r(:, :) = 0.d0
       CALL add_bfield( v%of_r, rho%of_r )
     else
-      print*, 'i_cons', i_cons, 'not implemented'
-      stop
+      call errore('onebody', 'i_cons not implemented', 1)
     endif
 
     do ik=1,nksym
@@ -224,13 +223,15 @@ MODULE onebody_hamiltonian
 601   CONTINUE
       !
       if (i_cons == 1) then
+        if (nspin .ne. 2) then
+          call errore('onebody', 'nspin!=2 b field not implemented', 1)
+        endif
         print*, 'adding external potential'
         allocate( hpsi_ext(npol*npwx, npol*h5id_orbs%maxnorb) )
         !
         ! add external potential (copied from vltot "local potential" block)
         !
-        do ia=1,npol
-          print*, 'ipol = ', ia
+        do ia=1,nspin
           hpsi_ext(:,:) = hpsi(:,:) ! start each spin from same H1
           do ibnd=1,norb_ik
             !
