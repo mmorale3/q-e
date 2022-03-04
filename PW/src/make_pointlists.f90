@@ -89,7 +89,7 @@ SUBROUTINE make_pointlists
   USE kinds,               ONLY : DP
   USE io_global,           ONLY : stdout
   USE ions_base,           ONLY : nat, tau, ntyp => nsp, ityp
-  USE cell_base,           ONLY : at, bg, alat
+  USE cell_base,           ONLY : at, bg, alat, omega
   USE mp_bands,            ONLY : me_bgrp
   USE fft_base,            ONLY : dfftp
   USE fft_types,           ONLY : fft_index_to_3d
@@ -102,6 +102,7 @@ SUBROUTINE make_pointlists
   INTEGER :: i, j, k, i0, j0, k0, ipol, nt, nt1
   LOGICAL :: offrange
   REAL(DP) :: posi(3), WS_radius, dist
+  REAL(DP) :: area, amoire_alat
   REAL(DP), ALLOCATABLE :: tau0(:,:), tau_SoA(:,:), distmin(:), distances(:)
   !
   WRITE( stdout,'(5x,"Generating pointlists ...")')
@@ -147,13 +148,17 @@ SUBROUTINE make_pointlists
      ENDDO                  ! iat1
   ENDDO                     ! iat
   !
+  if (lmoire) then
+    area = omega/(at(3,3)*alat)
+    amoire_alat = sqrt(2.d0*area/(sqrt(3.d0)*nat))
+  endif
   DO nt = 1, ntyp
      IF ((distmin(nt) < (2.d0*r_m(nt)*1.2d0)).OR.(r_m(nt) < 1.d-8)) THEN
      ! ... set the radius r_m to a value a little smaller than the minimum
      ! distance divided by 2*1.2 (so no point in space can belong to more
      ! than one atom)
      if (lmoire) then
-        r_m(nt) = 0.5d0/alat
+        r_m(nt) = 0.5d0*amoire_alat/1.2d0 * 0.99d0/alat  ! r_m should be in alat units
      else
         r_m(nt) = 0.5d0*distmin(nt)/1.2d0 * 0.99d0
      endif ! lmoire
