@@ -26,7 +26,11 @@ PROGRAM posthf
                     eha_    => eha,    &
                     vmoire_ => vmoire, &
                     pmoire_ => pmoire
+  USE input_parameters, ONLY : constrained_magnetization, starting_magnetization, &
+    no_constrain_type, lambda
+  USE noncollin_module, ONLY : i_cons, mcons, lambda_ => lambda, npol
   USE constants, ONLY: autoev, bohr_radius_angs, pi, e2
+  USE ions_base, ONLY: ntyp=>nsp
   USE KINDS, ONLY : DP
   !
   IMPLICIT NONE
@@ -46,7 +50,8 @@ PROGRAM posthf
             ndet, ncholmax,thresh, number_of_orbitals,eigcut_occ, eigcut, out_prefix, verbose, & 
             h5_add_orbs, nskipvir,low_memory, get_hf,get_mp2,get_rpa,use_symm, &
             regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment, &
-            lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire
+            lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire, &
+            no_constrain_type, lambda, constrained_magnetization, starting_magnetization
 #ifdef __MPI
   CALL mp_startup ( )
 #endif
@@ -136,6 +141,10 @@ PROGRAM posthf
   CALL mp_bcast(pmoire_in_deg, ionode_id, world_comm)
   CALL mp_bcast(mstar, ionode_id, world_comm)
   CALL mp_bcast(epsmoire, ionode_id, world_comm)
+  CALL mp_bcast(no_constrain_type, ionode_id, world_comm)
+  CALL mp_bcast(lambda, ionode_id, world_comm)
+  CALL mp_bcast(constrained_magnetization, ionode_id, world_comm)
+  CALL mp_bcast(starting_magnetization, ionode_id, world_comm)
   ! 
   ! ... transfer inputs to internal vairables
   ! 
@@ -149,6 +158,8 @@ PROGRAM posthf
     amoire_ = amoire_*mstar/epsmoire ! effetive bohr
     vmoire_ = vmoire_/eha_ ! effetive Ry
   endif ! lmoire
+  lambda_ = lambda
+
   !
   ! MAM: Problematic situation, I need to modify qnorm before init_us_1 is 
   !      called in read_file, but to modify qnorm accurately I need to know
@@ -166,6 +177,28 @@ PROGRAM posthf
   CALL start_clock ( 'read_file' )
   CALL read_file
   CALL stop_clock ( 'read_file' )
+
+  ! ntyp is initialized by read_file
+  do iq=1,ntyp
+    mcons(1,iq) = starting_magnetization(iq)
+  enddo
+  select case ( trim( constrained_magnetization ) )
+  case( 'none' )
+    i_cons = 0
+  case( 'atomic' )
+    print*, 'atomic magnetic constraints'
+    print*, '  lambda:', lambda
+    print*, '  no_constrain_type:', no_constrain_type
+    print*, '  mcons:'
+    do iq=1,ntyp
+      print*, (mcons(ik,iq),ik=1,npol)
+    enddo
+    i_cons = 1
+  case default
+    call errore('posthf', 'constrained_magnetization' // &
+      & trim( constrained_magnetization ) // 'not implemented', 1)
+  end select
+
   qnorm_ = 0.0_dp
   DO iq = 1,nks
     DO ik = iq+1,nks
