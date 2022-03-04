@@ -57,7 +57,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP) :: CZERO
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
-    COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
+    COMPLEX(DP), ALLOCATABLE :: hpsi(:,:), hpsi_ext(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     !
 
@@ -223,8 +223,42 @@ MODULE onebody_hamiltonian
       !
 601   CONTINUE
       !
+      if (i_cons == 1) then
+        print*, 'adding external potential'
+        allocate( hpsi_ext(npol*npwx, npol*h5id_orbs%maxnorb) )
+        !
+        ! add external potential (copied from vltot "local potential" block)
+        !
+        do ia=1,npol
+          print*, 'ipol = ', ia
+          hpsi_ext(:,:) = hpsi(:,:) ! start each spin from same H1
+          do ibnd=1,norb_ik
+            !
+            psic (:) = (0.d0,0.d0)
+            psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npw,ibnd)
+            if(gamma_only) psic (dfft%nlm(igksym(1:npw))) = CONJG(Orbitals(1:npw,ibnd))
+            !
+            CALL invfft ('Wave', psic, dfft)
+            !
+            ! vltot lives in dfftp, so doublegrid must be false for now
+            psic (1:dfft%nnr) = psic (1:dfft%nnr) * v%of_r(1:dfft%nnr, ia)
+            !
+            CALL fwfft ('Wave', psic, dfft)
+            !
+            hpsi_ext(1:npw, ibnd) = hpsi_ext(1:npw, ibnd) + psic(dfft%nl(igksym(1:npw)))
+            if(noncolin) stop
+            !
+          enddo
+          if(gamma_only .AND. gstart == 2 ) &
+            hpsi_ext(1,1:norb_ik) = CMPLX( DBLE( hpsi_ext(1,1:norb_ik) ), &
+                                                  0.D0 ,kind=DP)
+          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
+          CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik+nksym*(ia-1),H1)
+        enddo
+      else
       CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik,H1)
       !
+      endif ! i_cons
       deallocate(H1)  
       !
     end do
@@ -235,6 +269,7 @@ MODULE onebody_hamiltonian
     CALL deallocate_bec_type (becp)
     if( allocated(pointlist) ) deallocate( pointlist )
     if( allocated(factlist) ) deallocate( factlist )
+    IF( allocated(hpsi_ext) ) DEALLOCATE (hpsi_ext)
  
   END SUBROUTINE getH1
 
