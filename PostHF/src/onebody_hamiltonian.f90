@@ -51,7 +51,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1_mf,e1_so_mf
     !
     COMPLEX(DP) :: ctemp
-    INTEGER :: ia, ib, i0, no, error, npw
+    INTEGER :: ia, ib, i0, no, error, npw, i1
     INTEGER :: ik,ibnd,ispin
     INTEGER :: norb_ik
     COMPLEX(DP) :: CZERO
@@ -209,18 +209,6 @@ MODULE onebody_hamiltonian
           e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,3),norb_ik,0,norb_ik,nmax_DM)
         endif
       endif
-
-      ! collect on head node!
-      ! transpose to account for expected row major format in esh5  
-      do ia=1,npol*norb_ik
-        do ib=ia+1,npol*norb_ik
-          ctemp = H1(ia,ib)
-          H1(ia,ib) = H1(ib,ia)
-          H1(ib,ia) = ctemp 
-        enddo
-      enddo
-      !
-601   CONTINUE
       !
       if (i_cons == 1) then
         if (nspin .ne. 2) then
@@ -231,7 +219,7 @@ MODULE onebody_hamiltonian
         !
         ! add external potential (copied from vltot "local potential" block)
         !
-        do ia=1,nspin
+        do i1=1,nspin
           hpsi_ext(:,:) = hpsi(:,:) ! start each spin from same H1
           do ibnd=1,norb_ik
             !
@@ -242,7 +230,7 @@ MODULE onebody_hamiltonian
             CALL invfft ('Wave', psic, dfft)
             !
             ! vltot lives in dfftp, so doublegrid must be false for now
-            psic (1:dfft%nnr) = psic (1:dfft%nnr) * v%of_r(1:dfft%nnr, ia)
+            psic (1:dfft%nnr) = psic (1:dfft%nnr) * v%of_r(1:dfft%nnr, i1)
             !
             CALL fwfft ('Wave', psic, dfft)
             !
@@ -254,9 +242,25 @@ MODULE onebody_hamiltonian
             hpsi_ext(1,1:norb_ik) = CMPLX( DBLE( hpsi_ext(1,1:norb_ik) ), &
                                                   0.D0 ,kind=DP)
           CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
-          CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik+nksym*(ia-1),H1)
+          ! transpose to account for expected row major format in esh5
+          do ia=1,npol*norb_ik
+            do ib=ia+1,npol*norb_ik
+              ctemp = H1(ia,ib)
+              H1(ia,ib) = H1(ib,ia)
+              H1(ib,ia) = ctemp
+            enddo
+          enddo
+          CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik+nksym*(i1-1),H1)
         enddo
       else
+      ! transpose to account for expected row major format in esh5
+      do ia=1,npol*norb_ik
+        do ib=ia+1,npol*norb_ik
+          ctemp = H1(ia,ib)
+          H1(ia,ib) = H1(ib,ia)
+          H1(ib,ia) = ctemp
+        enddo
+      enddo
       CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik,H1)
       !
       endif ! i_cons
