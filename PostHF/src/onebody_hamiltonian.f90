@@ -228,8 +228,9 @@ MODULE onebody_hamiltonian
           do ibnd=1,norb_ik
             !
             psic_nc(:,:) = (0.d0,0.d0)
-            ! !!!! HACK assume every basis is spin up
+            ! !!!! HACK assume basis is half spin up, half spin dn
             psic_nc(dfft%nl(igksym(1:npw)),1) = Orbitals(1:npw,ibnd)
+            psic_nc(dfft%nl(igksym(1:npw)),2) = Orbitals(1:npw,ibnd+mxorb)
             ! end HACK !!!!
             do ipol=1,npol
               CALL invfft ('Wave', psic_nc(:,ipol), dfft)
