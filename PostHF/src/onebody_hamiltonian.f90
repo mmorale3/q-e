@@ -53,7 +53,7 @@ MODULE onebody_hamiltonian
     COMPLEX(DP) :: ctemp, sup, sdn
     INTEGER :: ia, ib, i0, no, error, npw, i1, j
     INTEGER :: ik,ibnd,ispin,ipol
-    INTEGER :: norb_ik
+    INTEGER :: norb_ik, mxorb
     COMPLEX(DP) :: CZERO
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: H1(:,:)
@@ -72,12 +72,13 @@ MODULE onebody_hamiltonian
     ! these (Hartree/EXX) are added in the 2-body part 
     if(okvan .or. okpaw) call reset_deeq()
 
-    allocate( Orbitals(npwx, h5id_orbs%maxnorb) )
+    mxorb = h5id_orbs%maxnorb
+    allocate( Orbitals(npwx, mxorb) )
 
     if(noncolin) &
-      allocate( evc_(npol*npwx,npol*h5id_orbs%maxnorb) )
-    allocate( hpsi(npol*npwx, npol*h5id_orbs%maxnorb) )
-    CALL allocate_bec_type ( nkb, npol*h5id_orbs%maxnorb, becp )
+      allocate( evc_(npol*npwx,npol*mxorb) )
+    allocate( hpsi(npol*npwx, npol*mxorb) )
+    CALL allocate_bec_type ( nkb, npol*mxorb, becp )
     write(*,*) 'USPP nkb:',nkb
 
     ! set spin, only spin = 1 is used
@@ -127,7 +128,7 @@ MODULE onebody_hamiltonian
       END DO
       ! kinetic energy
       if(present(tkin)) then
-        CALL fillH1(H1, hpsi, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
+        CALL fillH1(H1, hpsi, Orbitals, norb_ik, mxorb, npw)
         do ispin=1,min(2,nspin)
           i0 = (ispin-1)*(npol-1)*norb_ik
           tkin = tkin + onebody_energy(H1,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
@@ -179,7 +180,7 @@ MODULE onebody_hamiltonian
         hpsi(1,1:norb_ik) = CMPLX( DBLE( hpsi(1,1:norb_ik) ), &
                                               0.D0 ,kind=DP)
       ! H1(a,b) = 1/Ni sum_i conjg(PsiL(i,a)) * PsiR(i, b)
-      CALL fillH1(H1, hpsi, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
+      CALL fillH1(H1, hpsi, Orbitals, norb_ik, mxorb, npw)
 
       if(present(e1)) then
         do ispin=1,min(2,nspin)
@@ -218,7 +219,7 @@ MODULE onebody_hamiltonian
           call errore('onebody', 'gamma b field not implemented', 1)
         endif
         print*, 'adding external potential'
-        allocate( hpsi_ext(npol*npwx, npol*h5id_orbs%maxnorb) )
+        allocate( hpsi_ext(npol*npwx, npol*mxorb) )
         !
         ! add external potential (copied from vltot "local potential" block)
         !
@@ -247,7 +248,7 @@ MODULE onebody_hamiltonian
               hpsi_ext(npwx+1:npwx+npw, ibnd+norb_ik) = hpsi_ext(npwx+1:npwx+npw, ibnd+norb_ik) + psic_nc(dfft%nl(igksym(1:npw)),2)
             enddo
           enddo ! ibnd
-          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
+          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, mxorb, npw)
           ! transpose to account for expected row major format in esh5
           do ia=1,npol*norb_ik
             do ib=ia+1,npol*norb_ik
@@ -275,7 +276,7 @@ MODULE onebody_hamiltonian
             hpsi_ext(1:npw, ibnd) = hpsi_ext(1:npw, ibnd) + psic(dfft%nl(igksym(1:npw)))
             !
           enddo
-          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
+          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, mxorb, npw)
           ! transpose to account for expected row major format in esh5
           do ia=1,npol*norb_ik
             do ib=ia+1,npol*norb_ik
