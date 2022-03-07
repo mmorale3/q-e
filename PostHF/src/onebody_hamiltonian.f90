@@ -22,7 +22,7 @@ MODULE onebody_hamiltonian
   SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf,tkin)
     USE scf, ONLY: vltot, rho, v
     USE wvfct, ONLY: npwx, g2kin
-    USE wavefunctions, ONLY : psic
+    USE wavefunctions, ONLY : psic, psic_nc
     USE cell_base, ONLY: tpiba2
     USE becmod,   ONLY : becp, calbec, allocate_bec_type, deallocate_bec_type
     USE noncollin_module,     ONLY : noncolin, npol,\
@@ -50,9 +50,9 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1,e1_so,tkin
     COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1_mf,e1_so_mf
     !
-    COMPLEX(DP) :: ctemp
-    INTEGER :: ia, ib, i0, no, error, npw, i1
-    INTEGER :: ik,ibnd,ispin
+    COMPLEX(DP) :: ctemp, sup, sdn
+    INTEGER :: ia, ib, i0, no, error, npw, i1, j
+    INTEGER :: ik,ibnd,ispin,ipol
     INTEGER :: norb_ik
     COMPLEX(DP) :: CZERO
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
@@ -222,9 +222,41 @@ MODULE onebody_hamiltonian
         !
         ! add external potential (copied from vltot "local potential" block)
         !
-        if (noncolin) then
-          print*, 'implementing'
-          stop
+        if(noncolin) then
+          hpsi_ext(:,:) = hpsi(:,:)
+          do ibnd=1,norb_ik
+            !
+            psic_nc(:,:) = (0.d0,0.d0)
+            ! !!!! HACK assume every basis is spin up
+            psic_nc(dfft%nl(igksym(1:npw)),1) = Orbitals(1:npw,ibnd)
+            ! end HACK !!!!
+            do ipol=1,npol
+              CALL invfft ('Wave', psic_nc(:,ipol), dfft)
+            enddo
+            !
+            do j=1,dfft%nnr ! copy from vloc_psi.f90::vloc_psi_nc, domag
+              sup = psic_nc(j,1) * (v%of_r(j,4)) + &
+                    psic_nc(j,2) * (v%of_r(j,2)-(0.d0,1.d0)*v%of_r(j,3))
+              psic_nc(j,1) = sup
+              psic_nc(j,2) = sdn
+            enddo
+            !
+            do ipol=1,npol
+              CALL fwfft ('Wave', psic_nc(:,ipol), dfft)
+              hpsi_ext(1:npw, ibnd) = hpsi_ext(1:npw, ibnd) + psic_nc(dfft%nl(igksym(1:npw)),1)
+              hpsi_ext(npwx+1:npwx+npw, ibnd+norb_ik) = hpsi_ext(npwx+1:npwx+npw, ibnd+norb_ik) + psic_nc(dfft%nl(igksym(1:npw)),2)
+            enddo
+          enddo ! ibnd
+          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
+          ! transpose to account for expected row major format in esh5
+          do ia=1,npol*norb_ik
+            do ib=ia+1,npol*norb_ik
+              ctemp = H1(ia,ib)
+              H1(ia,ib) = H1(ib,ia)
+              H1(ib,ia) = ctemp
+            enddo
+          enddo
+          CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik,H1)
         else if (nspin==2) then
         do i1=1,nspin ! !!!! HACK write twice as many H1 for collinear case
           hpsi_ext(:,:) = hpsi(:,:) ! start each spin from same H1
