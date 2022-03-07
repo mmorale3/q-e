@@ -211,21 +211,27 @@ MODULE onebody_hamiltonian
       endif
       !
       if (i_cons == 1) then
-        if (nspin .ne. 2) then
-          call errore('onebody', 'nspin!=2 b field not implemented', 1)
+        if ((nspin .ne. 2).and.(nspin .ne. 4)) then
+          call errore('onebody', 'nspin b field not implemented', 1)
+        endif
+        if (gamma_only) then
+          call errore('onebody', 'gamma b field not implemented', 1)
         endif
         print*, 'adding external potential'
         allocate( hpsi_ext(npol*npwx, npol*h5id_orbs%maxnorb) )
         !
         ! add external potential (copied from vltot "local potential" block)
         !
-        do i1=1,nspin
+        if (noncolin) then
+          print*, 'implementing'
+          stop
+        else if (nspin==2) then
+        do i1=1,nspin ! !!!! HACK write twice as many H1 for collinear case
           hpsi_ext(:,:) = hpsi(:,:) ! start each spin from same H1
           do ibnd=1,norb_ik
             !
             psic (:) = (0.d0,0.d0)
             psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npw,ibnd)
-            if(gamma_only) psic (dfft%nlm(igksym(1:npw))) = CONJG(Orbitals(1:npw,ibnd))
             !
             CALL invfft ('Wave', psic, dfft)
             !
@@ -235,12 +241,8 @@ MODULE onebody_hamiltonian
             CALL fwfft ('Wave', psic, dfft)
             !
             hpsi_ext(1:npw, ibnd) = hpsi_ext(1:npw, ibnd) + psic(dfft%nl(igksym(1:npw)))
-            if(noncolin) stop
             !
           enddo
-          if(gamma_only .AND. gstart == 2 ) &
-            hpsi_ext(1,1:norb_ik) = CMPLX( DBLE( hpsi_ext(1,1:norb_ik) ), &
-                                                  0.D0 ,kind=DP)
           CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, h5id_orbs%maxnorb, npw)
           ! transpose to account for expected row major format in esh5
           do ia=1,npol*norb_ik
@@ -251,8 +253,10 @@ MODULE onebody_hamiltonian
             enddo
           enddo
           CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik+nksym*(i1-1),H1)
-        enddo
-      else
+        enddo ! i1
+        else ! not noncolin, not colin => para nothing to do
+        endif ! noncolin
+      else ! no magnetic constraint
       ! transpose to account for expected row major format in esh5
       do ia=1,npol*norb_ik
         do ib=ia+1,npol*norb_ik
