@@ -27,15 +27,18 @@ PROGRAM posthf
                     vmoire_ => vmoire, &
                     pmoire_ => pmoire
   USE input_parameters, ONLY : constrained_magnetization, starting_magnetization, &
-    no_constrain_type, lambda
-  USE noncollin_module, ONLY : i_cons, mcons, lambda_ => lambda, npol
+    no_constrain_type, lambda, angle1, angle2
+  USE noncollin_module, ONLY : noncolin, i_cons, mcons, lambda_ => lambda, npol, &
+    angle1_ => angle1, angle2_ => angle2
+  USE lsda_mod, ONLY: nspin
   USE constants, ONLY: autoev, bohr_radius_angs, pi, e2
   USE ions_base, ONLY: ntyp=>nsp
   USE KINDS, ONLY : DP
   !
   IMPLICIT NONE
   INTEGER :: ios, number_of_orbitals, ndet, nskipvir, read_from_h5
-  INTEGER :: iq, ik, regp
+  INTEGER :: iq, ik, regp, nt
+  REAL(DP) :: theta, phi
   REAL(DP) :: ncholmax, nextracut, thresh, eigcut_occ, eigcut, regkappa
   LOGICAL :: write_psir, expand_kp, debug, verbose 
   LOGICAL :: low_memory, update_qe_bands,get_hf,get_mp2,get_rpa,use_symm 
@@ -51,7 +54,8 @@ PROGRAM posthf
             h5_add_orbs, nskipvir,low_memory, get_hf,get_mp2,get_rpa,use_symm, &
             regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment, &
             lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire, &
-            no_constrain_type, lambda, constrained_magnetization, starting_magnetization
+            no_constrain_type, lambda, constrained_magnetization, starting_magnetization, &
+            angle1, angle2
 #ifdef __MPI
   CALL mp_startup ( )
 #endif
@@ -145,6 +149,8 @@ PROGRAM posthf
   CALL mp_bcast(lambda, ionode_id, world_comm)
   CALL mp_bcast(constrained_magnetization, ionode_id, world_comm)
   CALL mp_bcast(starting_magnetization, ionode_id, world_comm)
+  CALL mp_bcast(angle1, ionode_id, world_comm)
+  CALL mp_bcast(angle2, ionode_id, world_comm)
   ! 
   ! ... transfer inputs to internal vairables
   ! 
@@ -158,7 +164,6 @@ PROGRAM posthf
     amoire_ = amoire_*mstar/epsmoire ! effetive bohr
     vmoire_ = vmoire_/eha_ ! effetive Ry
   endif ! lmoire
-  lambda_ = lambda
 
   !
   ! MAM: Problematic situation, I need to modify qnorm before init_us_1 is 
@@ -179,21 +184,47 @@ PROGRAM posthf
   CALL stop_clock ( 'read_file' )
 
   ! ntyp is initialized by read_file
-  do iq=1,ntyp
-    mcons(1,iq) = starting_magnetization(iq)
-  enddo
+  if (noncolin) then
+    lambda_ = lambda
+    DO nt = 1, ntyp
+       angle1(nt) = pi * angle1(nt) / 180.D0
+       angle2(nt) = pi * angle2(nt) / 180.D0
+    ENDDO
+    angle1_ = angle1
+    angle2_ = angle2
+  endif
   select case ( trim( constrained_magnetization ) )
   case( 'none' )
     i_cons = 0
   case( 'atomic' )
+    i_cons = 1
+    IF (nspin == 4) THEN
+       ! non-collinear case
+       DO nt = 1, ntyp
+          !
+          theta = angle1(nt)
+          phi   = angle2(nt)
+          !
+          mcons(1,nt) = starting_magnetization(nt) * sin( theta ) * cos( phi )
+          mcons(2,nt) = starting_magnetization(nt) * sin( theta ) * sin( phi )
+          mcons(3,nt) = starting_magnetization(nt) * cos( theta )
+          !
+       ENDDO
+    ELSE
+       ! collinear case
+       DO nt = 1, ntyp
+          !
+          mcons(1,nt) = starting_magnetization(nt)
+          !
+       ENDDO
+    ENDIF
     print*, 'atomic magnetic constraints'
     print*, '  lambda:', lambda
     print*, '  no_constrain_type:', no_constrain_type
     print*, '  mcons:'
-    do iq=1,ntyp
-      print*, (mcons(ik,iq),ik=1,npol)
+    do nt=1,ntyp
+      print*, (mcons(ik,nt),ik=1,npol)
     enddo
-    i_cons = 1
   case default
     call errore('posthf', 'constrained_magnetization' // &
       & trim( constrained_magnetization ) // 'not implemented', 1)
