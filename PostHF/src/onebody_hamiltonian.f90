@@ -84,21 +84,6 @@ MODULE onebody_hamiltonian
     ! set spin, only spin = 1 is used
     current_spin = 1
 
-    ! partition real-space FFT grid among lattice sites
-    ALLOCATE( pointlist(dfft%nnr) )
-    ALLOCATE( factlist(dfft%nnr)  )
-    CALL make_pointlists()
-    ! magnetic field
-    if (i_cons == 0) then
-      print*, 'no magnetic constraint'
-    elseif (i_cons == 1) then
-      print*, 'atomic magnetic constraints'
-      v%of_r(:, :) = 0.d0
-      CALL add_bfield( v%of_r, rho%of_r )
-    else
-      call errore('onebody', 'i_cons not implemented', 1)
-    endif
-
     do ik=1,nksym
       norb_ik = h5id_orbs%norbK(ik)
       no = min(nmax_DM,norb_ik)
@@ -218,6 +203,21 @@ MODULE onebody_hamiltonian
         if (gamma_only) then
           call errore('onebody', 'gamma b field not implemented', 1)
         endif
+        ! partition real-space FFT grid among lattice sites
+        ALLOCATE( pointlist(dfft%nnr) )
+        ALLOCATE( factlist(dfft%nnr)  )
+        CALL make_pointlists()
+        ! magnetic field
+        if (i_cons == 0) then
+          print*, 'no magnetic constraint'
+        elseif (i_cons == 1) then
+          print*, 'atomic magnetic constraints'
+          v%of_r(:, :) = 0.d0
+          CALL add_bfield( v%of_r, rho%of_r )
+          CALL report_mag()
+        else
+          call errore('onebody', 'i_cons not implemented', 1)
+        endif
         print*, 'adding external potential'
         allocate( hpsi_ext(npol*npwx, npol*mxorb) )
         !
@@ -230,7 +230,7 @@ MODULE onebody_hamiltonian
             psic_nc(:,:) = (0.d0,0.d0)
             ! !!!! HACK assume basis is half spin up, half spin dn
             psic_nc(dfft%nl(igksym(1:npw)),1) = Orbitals(1:npw,ibnd)
-            psic_nc(dfft%nl(igksym(1:npw)),2) = Orbitals(1:npw,ibnd+mxorb)
+            !psic_nc(dfft%nl(igksym(1:npw)),2) = Orbitals(1:npw,ibnd+mxorb)
             ! end HACK !!!!
             do ipol=1,npol
               CALL invfft ('Wave', psic_nc(:,ipol), dfft)
