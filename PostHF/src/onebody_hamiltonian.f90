@@ -360,8 +360,10 @@ MODULE onebody_hamiltonian
              npol*norb,.false.,spsi)
       do ia=1,2*norb
         do ib=ia+1,2*norb
-          if( abs(H1(ia,ib)-conjg(H1(ib,ia))) > 1e-6 ) &
+          if( abs(H1(ia,ib)-conjg(H1(ib,ia))) > 1e-6 ) then
             write(*,*)ia,ib,H1(ia,ib),H1(ib,ia)
+            stop
+          endif
         enddo
       enddo
     endif ! noncollin
