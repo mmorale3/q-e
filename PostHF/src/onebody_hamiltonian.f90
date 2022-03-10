@@ -56,7 +56,7 @@ MODULE onebody_hamiltonian
     INTEGER :: norb_ik, mxorb
     COMPLEX(DP) :: CZERO
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
-    COMPLEX(DP), ALLOCATABLE :: H1(:,:), Hpin(:,:), Hpp(:,:), H1copy(:,:)
+    COMPLEX(DP), ALLOCATABLE :: H1(:,:), Hpin(:,:), H1copy(:,:)
     COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     REAL(DP), ALLOCATABLE :: v_of_r(:,:)
@@ -220,7 +220,6 @@ MODULE onebody_hamiltonian
         allocate( Hpin(norb_ik,norb_ik) )
         Hpin(:,:) = CZERO
         if (noncolin) then
-          allocate( Hpp(npol*norb_ik,npol*norb_ik) )
           ! DM  H1_offset
           !  1  0,0
           !  2  M,M
@@ -229,35 +228,29 @@ MODULE onebody_hamiltonian
           ia = norb_ik ! short-hand for M
           ! x
           CALL vlocalH1(Hpin, v_of_r(:,2), Orbitals, dfft, norb_ik, npw)
-          Hpp(:,:) = CZERO
-          Hpp(ia:,1:norb_ik) = Hpin(:,:)
-          Hpp(1:norb_ik,ia:) = Hpin(:,:)
           e1_pin = CZERO
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,3),0,ia,norb_ik,nmax_DM)
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,4),ia,0,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,3),0,0,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,4),0,0,norb_ik,nmax_DM)
           print*, 'E1 with xpin:', e1_pin
-          H1(:,:) = H1(:,:)+Hpp(:,:)
+          H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + Hpin(:,:)
+          H1(1:norb_ik,ia+1:) = H1(1:norb_ik,ia+1:) + Hpin(:,:)
           ! y
           CALL vlocalH1(Hpin, v_of_r(:,3), Orbitals, dfft, norb_ik, npw)
-          Hpp(:,:) = CZERO
-          Hpp(ia:,1:norb_ik) = (0.d0,  1.d0)*Hpin(:,:)
-          Hpp(1:norb_ik,ia:) = (0.d0, -1.d0)*Hpin(:,:)
           e1_pin = CZERO
-          e1_pin = e1_pin + (0.d0,  1.d0)*onebody_energy(Hpin,DM(:,:,ik,3),0,ia,norb_ik,nmax_DM)
-          e1_pin = e1_pin + (0.d0, -1.d0)*onebody_energy(Hpin,DM(:,:,ik,4),ia,0,norb_ik,nmax_DM)
+          e1_pin = e1_pin + (0.d0,  1.d0)*onebody_energy(Hpin,DM(:,:,ik,3),0,0,norb_ik,nmax_DM)
+          e1_pin = e1_pin + (0.d0, -1.d0)*onebody_energy(Hpin,DM(:,:,ik,4),0,0,norb_ik,nmax_DM)
           print*, 'E1 with ypin:', e1_pin
-          H1(:,:) = H1(:,:)+Hpp(:,:)
+          H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + (0.d0,  1.d0)*Hpin(:,:)
+          H1(1:norb_ik,ia+1:) = H1(1:norb_ik,ia+1:) + (0.d0, -1.d0)*Hpin(:,:)
           ! z
           CALL vlocalH1(Hpin, v_of_r(:, 4), Orbitals, dfft, norb_ik, npw)
           e1_pin = CZERO
-          e1_pin = e1_pin + onebody_energy(Hpp,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
-          e1_pin = e1_pin + onebody_energy(Hpp,DM(:,:,ik,2),ia,ia,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
+          e1_pin = e1_pin - onebody_energy(Hpin,DM(:,:,ik,2),0,0,norb_ik,nmax_DM)
           print*, 'E1 with zpin:', e1_pin
-          Hpp(:,:) = CZERO
-          Hpp(1:norb_ik,1:norb_ik) = Hpin(:,:)
-          Hpp(ia:,ia:) = (-1.d0, 0.d0)*Hpin(:,:)
+          H1(1:norb_ik,1:norb_ik) = H1(1:norb_ik,1:norb_ik) + Hpin(:,:)
+          H1(ia+1:,ia+1:) = H1(ia+1:,ia+1:) - Hpin(:,:)
           print*, 'E1 with zpin:', e1_pin
-          H1(:,:) = H1(:,:)+Hpp(:,:)
           ! total
           e1_pin = CZERO
           e1_pin = e1_pin + onebody_energy(H1,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
@@ -318,7 +311,6 @@ MODULE onebody_hamiltonian
     if( allocated(factlist) ) deallocate( factlist )
     if( allocated(v_of_r) ) deallocate( v_of_r )
     IF( allocated(Hpin) ) deallocate( Hpin )
-    IF( allocated(Hpp) ) deallocate( Hpp )
     IF( allocated(H1copy) ) deallocate( H1copy )
  
   END SUBROUTINE getH1
