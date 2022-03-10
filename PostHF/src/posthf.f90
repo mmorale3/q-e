@@ -185,7 +185,6 @@ PROGRAM posthf
 
   ! ntyp is initialized by read_file
   if (noncolin) then
-    lambda_ = lambda
     DO nt = 1, ntyp
        angle1(nt) = pi * angle1(nt) / 180.D0
        angle2(nt) = pi * angle2(nt) / 180.D0
@@ -198,6 +197,7 @@ PROGRAM posthf
     i_cons = 0
   case( 'atomic' )
     i_cons = 1
+    lambda_ = lambda
     IF (nspin == 4) THEN
        ! non-collinear case
        DO nt = 1, ntyp
@@ -223,7 +223,7 @@ PROGRAM posthf
     print*, '  no_constrain_type:', no_constrain_type
     print*, '  mcons:'
     do nt=1,ntyp
-      print*, (mcons(ik,nt),ik=1,npol)
+      print*, (mcons(ik,nt),ik=1,nspin-1)
     enddo
   case default
     call errore('posthf', 'constrained_magnetization' // &
