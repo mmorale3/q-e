@@ -20,13 +20,13 @@ MODULE onebody_hamiltonian
   !
   !-----------------------------------------------------------------------
   SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf,tkin)
-    USE scf, ONLY: vltot, rho, v
+    USE scf, ONLY: vltot
     USE wvfct, ONLY: npwx, g2kin
     USE wavefunctions, ONLY : psic, psic_nc
     USE cell_base, ONLY: tpiba2
     USE becmod,   ONLY : becp, calbec, allocate_bec_type, deallocate_bec_type
-    USE noncollin_module,     ONLY : noncolin, npol,\
-      pointlist, factlist, i_cons, lambda, mcons
+    USE noncollin_module, ONLY : noncolin, npol,\
+      pointlist, factlist, i_cons
     USE control_flags, ONLY : gamma_only
     USE gvect, ONLY: ngm, g, gstart
     USE gvecw, ONLY : ecutwfc
@@ -52,13 +52,15 @@ MODULE onebody_hamiltonian
     !
     COMPLEX(DP) :: ctemp, sup, sdn
     INTEGER :: ia, ib, i0, no, error, npw, i1, j
-    INTEGER :: ik,ibnd,ispin,ipol
+    INTEGER :: ik,ibnd,ispin
     INTEGER :: norb_ik, mxorb
     COMPLEX(DP) :: CZERO
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
-    COMPLEX(DP), ALLOCATABLE :: H1(:,:)
-    COMPLEX(DP), ALLOCATABLE :: hpsi(:,:), hpsi_ext(:,:)
+    COMPLEX(DP), ALLOCATABLE :: H1(:,:), Hpin(:,:), Hpp(:,:), H1copy(:,:)
+    COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
+    REAL(DP), ALLOCATABLE :: v_of_r(:,:)
+    COMPLEX(DP) :: e1_pin, ecomp
     !
 
     CZERO = (0.d0,0.d0)
@@ -207,49 +209,61 @@ MODULE onebody_hamiltonian
         ALLOCATE( pointlist(dfft%nnr) )
         ALLOCATE( factlist(dfft%nnr)  )
         CALL make_pointlists()
-        ! magnetic field
-        if (i_cons == 0) then
-          print*, 'no magnetic constraint'
-        elseif (i_cons == 1) then
-          print*, 'atomic magnetic constraints'
-          v%of_r(:, :) = 0.d0
-          CALL add_bfield( v%of_r, rho%of_r )
-          CALL report_mag()
-        else
-          call errore('onebody', 'i_cons not implemented', 1)
-        endif
+        ! add magnetic field
+        print*, 'creating external potential'
+        !v%of_r(:, :) = 0.d0
+        !CALL add_bfield( v%of_r, rho%of_r )
+        !CALL report_mag()
+        ALLOCATE( v_of_r(dfft%nnr,nspin) )
+        CALL add_initial_bfield(v_of_r)
+        !
         print*, 'adding external potential'
-        allocate( hpsi_ext(npol*npwx, npol*mxorb) )
-        !
-        ! add external potential (copied from vltot "local potential" block)
-        !
-        if(noncolin) then
-          hpsi_ext(:,:) = hpsi(:,:)
-          do ibnd=1,norb_ik
-            !
-            psic_nc(:,:) = (0.d0,0.d0)
-            ! !!!! HACK assume basis is half spin up, half spin dn
-            psic_nc(dfft%nl(igksym(1:npw)),1) = Orbitals(1:npw,ibnd)
-            !psic_nc(dfft%nl(igksym(1:npw)),2) = Orbitals(1:npw,ibnd+mxorb)
-            ! end HACK !!!!
-            do ipol=1,npol
-              CALL invfft ('Wave', psic_nc(:,ipol), dfft)
-            enddo
-            !
-            do j=1,dfft%nnr ! copy from vloc_psi.f90::vloc_psi_nc, domag
-              sup = psic_nc(j,1) * (v%of_r(j,4)) + &
-                    psic_nc(j,2) * (v%of_r(j,2)-(0.d0,1.d0)*v%of_r(j,3))
-              psic_nc(j,1) = sup
-              psic_nc(j,2) = sdn
-            enddo
-            !
-            do ipol=1,npol
-              CALL fwfft ('Wave', psic_nc(:,ipol), dfft)
-              hpsi_ext(1:npw, ibnd) = hpsi_ext(1:npw, ibnd) + psic_nc(dfft%nl(igksym(1:npw)),1)
-              hpsi_ext(npwx+1:npwx+npw, ibnd+norb_ik) = hpsi_ext(npwx+1:npwx+npw, ibnd+norb_ik) + psic_nc(dfft%nl(igksym(1:npw)),2)
-            enddo
-          enddo ! ibnd
-          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, mxorb, npw)
+        allocate( Hpin(norb_ik,norb_ik) )
+        Hpin(:,:) = CZERO
+        if (noncolin) then
+          allocate( Hpp(npol*norb_ik,npol*norb_ik) )
+          ia = norb_ik+1
+          ib = npol*norb_ik
+          ! x
+          CALL vlocalH1(Hpin, v_of_r(:,2), Orbitals, dfft, norb_ik, npw)
+          Hpp(:,:) = CZERO
+          Hpp(ia:ib,1:norb_ik) = Hpin(:,:)
+          Hpp(1:norb_ik,ia:ib) = Hpin(:,:)
+          do ispin=1,min(2,nspin)
+            i0 = (ispin-1)*(npol-1)*norb_ik
+            e1_pin = onebody_energy(Hpp,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
+            print*, 'ispin, E1 with xpin:', ispin, e1_pin
+          enddo
+          H1(:,:) = H1(:,:)+Hpp(:,:)
+          ! y
+          CALL vlocalH1(Hpin, v_of_r(:,3), Orbitals, dfft, norb_ik, npw)
+          Hpp(:,:) = CZERO
+          Hpp(ia:ib,1:norb_ik) = (0.d0, -1.d0)*Hpin(:,:)
+          Hpp(1:norb_ik,ia:ib) = (0.d0,  1.d0)*Hpin(:,:)
+          do ispin=1,min(2,nspin)
+            i0 = (ispin-1)*(npol-1)*norb_ik
+            e1_pin = onebody_energy(Hpp,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
+            print*, 'ispin, E1 with ypin:', ispin, e1_pin
+          enddo
+          H1(:,:) = H1(:,:)+Hpp(:,:)
+          ! z
+          CALL vlocalH1(Hpin, v_of_r(:, 4), Orbitals, dfft, norb_ik, npw)
+          Hpp(:,:) = CZERO
+          Hpp(1:norb_ik,1:norb_ik) = Hpin(:,:)
+          Hpp(ia:ib,ia:ib) = (-1.d0, 0.d0)*Hpin(:,:)
+          do ispin=1,min(2,nspin)
+            i0 = (ispin-1)*(npol-1)*norb_ik
+            e1_pin = onebody_energy(Hpp,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
+            print*, 'ispin, E1 with zpin:', ispin, e1_pin
+          enddo
+          H1(:,:) = H1(:,:)+Hpp(:,:)
+          ! total
+          e1_pin = CZERO
+          do ispin=1,min(2,nspin)
+            i0 = (ispin-1)*(npol-1)*norb_ik
+            e1_pin = e1_pin+onebody_energy(H1,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
+          enddo
+          print*, 'E1 with pin:', e1_pin
           ! transpose to account for expected row major format in esh5
           do ia=1,npol*norb_ik
             do ib=ia+1,npol*norb_ik
@@ -259,48 +273,37 @@ MODULE onebody_hamiltonian
             enddo
           enddo
           CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik,H1)
-        else if (nspin==2) then
-        do i1=1,nspin ! !!!! HACK write twice as many H1 for collinear case
-          hpsi_ext(:,:) = hpsi(:,:) ! start each spin from same H1
-          do ibnd=1,norb_ik
-            !
-            psic (:) = (0.d0,0.d0)
-            psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npw,ibnd)
-            !
-            CALL invfft ('Wave', psic, dfft)
-            !
-            ! vltot lives in dfftp, so doublegrid must be false for now
-            psic (1:dfft%nnr) = psic (1:dfft%nnr) * v%of_r(1:dfft%nnr, i1)
-            !
-            CALL fwfft ('Wave', psic, dfft)
-            !
-            hpsi_ext(1:npw, ibnd) = hpsi_ext(1:npw, ibnd) + psic(dfft%nl(igksym(1:npw)))
-            !
-          enddo
-          CALL fillH1(H1, hpsi_ext, Orbitals, norb_ik, mxorb, npw)
-          ! transpose to account for expected row major format in esh5
-          do ia=1,npol*norb_ik
-            do ib=ia+1,npol*norb_ik
-              ctemp = H1(ia,ib)
-              H1(ia,ib) = H1(ib,ia)
-              H1(ib,ia) = ctemp
+        else ! collinear !!!! HACK: output 2*nkpt H1
+          allocate( H1copy(npol*norb_ik, npol*norb_ik) )
+          H1copy(:,:) = H1(:,:)
+          do ispin=1,2
+            CALL vlocalH1(Hpin, v_of_r(:,ispin), Orbitals, dfft, norb_ik, npw)
+            H1(:,:) = H1copy(:,:) + Hpin(:,:)
+            i0 = 0
+            e1_pin = onebody_energy(H1,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
+            print*, 'E1 up/dn=', ispin, 'with pin:', e1_pin
+            ! transpose to account for expected row major format in esh5
+            do ia=1,npol*norb_ik
+              do ib=ia+1,npol*norb_ik
+                ctemp = H1(ia,ib)
+                H1(ia,ib) = H1(ib,ia)
+                H1(ib,ia) = ctemp
+              enddo
             enddo
-          enddo
-          CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik+nksym*(i1-1),H1)
-        enddo ! i1
-        else ! not noncolin, not colin => para nothing to do
+            CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik+(ispin-1)*(nksym),H1)
+          enddo ! ispin
         endif ! noncolin
       else ! no magnetic constraint
-      ! transpose to account for expected row major format in esh5
-      do ia=1,npol*norb_ik
-        do ib=ia+1,npol*norb_ik
-          ctemp = H1(ia,ib)
-          H1(ia,ib) = H1(ib,ia)
-          H1(ib,ia) = ctemp
+        ! transpose to account for expected row major format in esh5
+        do ia=1,npol*norb_ik
+          do ib=ia+1,npol*norb_ik
+            ctemp = H1(ia,ib)
+            H1(ia,ib) = H1(ib,ia)
+            H1(ib,ia) = ctemp
+          enddo
         enddo
-      enddo
-      CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik,H1)
-      !
+        CALL esh5_posthf_write_h1(h5id_hamil%id,npol*norb_ik,ik,H1)
+        !
       endif ! i_cons
       deallocate(H1)  
       !
@@ -312,7 +315,10 @@ MODULE onebody_hamiltonian
     CALL deallocate_bec_type (becp)
     if( allocated(pointlist) ) deallocate( pointlist )
     if( allocated(factlist) ) deallocate( factlist )
-    IF( allocated(hpsi_ext) ) DEALLOCATE (hpsi_ext)
+    if( allocated(v_of_r) ) deallocate( v_of_r )
+    IF( allocated(Hpin) ) deallocate( Hpin )
+    IF( allocated(Hpp) ) deallocate( Hpp )
+    IF( allocated(H1copy) ) deallocate( H1copy )
  
   END SUBROUTINE getH1
 
@@ -383,6 +389,56 @@ MODULE onebody_hamiltonian
       enddo
     enddo
   end function
+
+  subroutine vlocalH1(H1loc, v_of_r, Orbitals, dfft, norb, npw)
+    ! construct one-body hamiltonian from local operator on basis
+    !
+    ! Inputs:
+    !   v_of_r (array): (nnr,) local potential
+    !   Orbitals (array): (npw, norb) basis functions in PW
+    !   dfft (fft_type_descriptor): discrete FFT mesh
+    ! Return:
+    !   H1loc (array): (norb, norb) one-body hamiltonian
+    !
+    USE fft_types, ONLY: fft_type_descriptor
+    use fft_interfaces, ONLY : invfft, fwfft
+    USE wavefunctions, ONLY : psic
+    USE wvfct, ONLY: npwx
+    USE posthf_mod, ONLY: igksym, e2Ha
+    ! inputs and outputs
+    complex(DP), intent(out) :: H1loc(norb, norb)
+    TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
+    real(DP), intent(in) :: v_of_r(dfft%nnr)
+    complex(DP), intent(in) :: Orbitals(npw, norb)
+    integer, intent(in) :: norb, npw
+    ! local variables
+    COMPLEX(DP) :: CZERO, CONE, CNORM
+    COMPLEX(DP) :: hpsi_loc(npw, norb)
+    COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
+    integer :: ibnd
+    CZERO = (0.d0,0.d0)
+    CONE = (1.d0,0.d0)
+    CNORM = CONE*e2Ha
+    hpsi_loc(:,:) = CZERO
+    allocate(spsi(1,1))  ! to avoid issues in debugging mode
+    !
+    ! apply local potential in real space
+    do ibnd = 1, norb
+      psic (:) = (0.d0,0.d0)
+      psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npw,ibnd)
+      !
+      CALL invfft ('Wave', psic, dfft)
+      !
+      psic (1:dfft%nnr) = psic (1:dfft%nnr) * v_of_r(1:dfft%nnr)
+      !
+      CALL fwfft ('Wave', psic, dfft)
+      !
+      hpsi_loc(1:npw, ibnd) = hpsi_loc(1:npw, ibnd) + psic(dfft%nl(igksym(1:npw)))
+    end do ! ibnd
+    CALL Overlap(norb,norb,npw,CNORM,Orbitals(1,1),npwx,&
+            hpsi_loc(1,1),npwx,CZERO,H1loc,norb,.false.,spsi)
+    IF( allocated(spsi) ) deallocate(spsi)
+  end subroutine vlocalH1
 
 END MODULE onebody_hamiltonian 
 
