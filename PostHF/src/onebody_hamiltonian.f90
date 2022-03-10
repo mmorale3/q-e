@@ -185,7 +185,7 @@ MODULE onebody_hamiltonian
           ! (up,down)
           e1_so = e1_so + onebody_energy(H1,DM(:,:,ik,3),0,norb_ik,norb_ik,nmax_DM)
           ! (down,up)
-          e1_so = e1_so + onebody_energy(H1,DM(:,:,ik,3),norb_ik,0,norb_ik,nmax_DM)
+          e1_so = e1_so + onebody_energy(H1,DM(:,:,ik,4),norb_ik,0,norb_ik,nmax_DM)
         endif
       endif
       if(present(e1_so_mf)) then
@@ -193,7 +193,7 @@ MODULE onebody_hamiltonian
           ! (up,down)
           e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,3),0,norb_ik,norb_ik,nmax_DM)
           ! (down,up)
-          e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,3),norb_ik,0,norb_ik,nmax_DM)
+          e1_so_mf = e1_so + onebody_energy(H1,DM_mf(:,:,ik,4),norb_ik,0,norb_ik,nmax_DM)
         endif
       endif
       !
@@ -221,47 +221,49 @@ MODULE onebody_hamiltonian
         Hpin(:,:) = CZERO
         if (noncolin) then
           allocate( Hpp(npol*norb_ik,npol*norb_ik) )
-          ia = norb_ik+1
-          ib = npol*norb_ik
+          ! DM  H1_offset
+          !  1  0,0
+          !  2  M,M
+          !  3  0,M
+          !  4  M,0
+          ia = norb_ik ! short-hand for M
           ! x
           CALL vlocalH1(Hpin, v_of_r(:,2), Orbitals, dfft, norb_ik, npw)
           Hpp(:,:) = CZERO
-          Hpp(ia:ib,1:norb_ik) = Hpin(:,:)
-          Hpp(1:norb_ik,ia:ib) = Hpin(:,:)
-          do ispin=1,min(2,nspin)
-            i0 = (ispin-1)*(npol-1)*norb_ik
-            e1_pin = onebody_energy(Hpp,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
-            print*, 'ispin, E1 with xpin:', ispin, e1_pin
-          enddo
+          Hpp(ia:,1:norb_ik) = Hpin(:,:)
+          Hpp(1:norb_ik,ia:) = Hpin(:,:)
+          e1_pin = CZERO
+          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,3),0,ia,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,4),ia,0,norb_ik,nmax_DM)
+          print*, 'E1 with xpin:', e1_pin
           H1(:,:) = H1(:,:)+Hpp(:,:)
           ! y
           CALL vlocalH1(Hpin, v_of_r(:,3), Orbitals, dfft, norb_ik, npw)
           Hpp(:,:) = CZERO
-          Hpp(ia:ib,1:norb_ik) = (0.d0, -1.d0)*Hpin(:,:)
-          Hpp(1:norb_ik,ia:ib) = (0.d0,  1.d0)*Hpin(:,:)
-          do ispin=1,min(2,nspin)
-            i0 = (ispin-1)*(npol-1)*norb_ik
-            e1_pin = onebody_energy(Hpp,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
-            print*, 'ispin, E1 with ypin:', ispin, e1_pin
-          enddo
+          Hpp(ia:,1:norb_ik) = (0.d0,  1.d0)*Hpin(:,:)
+          Hpp(1:norb_ik,ia:) = (0.d0, -1.d0)*Hpin(:,:)
+          e1_pin = CZERO
+          e1_pin = e1_pin + (0.d0,  1.d0)*onebody_energy(Hpin,DM(:,:,ik,3),0,ia,norb_ik,nmax_DM)
+          e1_pin = e1_pin + (0.d0, -1.d0)*onebody_energy(Hpin,DM(:,:,ik,4),ia,0,norb_ik,nmax_DM)
+          print*, 'E1 with ypin:', e1_pin
           H1(:,:) = H1(:,:)+Hpp(:,:)
           ! z
           CALL vlocalH1(Hpin, v_of_r(:, 4), Orbitals, dfft, norb_ik, npw)
+          e1_pin = CZERO
+          e1_pin = e1_pin + onebody_energy(Hpp,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(Hpp,DM(:,:,ik,2),ia,ia,norb_ik,nmax_DM)
+          print*, 'E1 with zpin:', e1_pin
           Hpp(:,:) = CZERO
           Hpp(1:norb_ik,1:norb_ik) = Hpin(:,:)
-          Hpp(ia:ib,ia:ib) = (-1.d0, 0.d0)*Hpin(:,:)
-          do ispin=1,min(2,nspin)
-            i0 = (ispin-1)*(npol-1)*norb_ik
-            e1_pin = onebody_energy(Hpp,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
-            print*, 'ispin, E1 with zpin:', ispin, e1_pin
-          enddo
+          Hpp(ia:,ia:) = (-1.d0, 0.d0)*Hpin(:,:)
+          print*, 'E1 with zpin:', e1_pin
           H1(:,:) = H1(:,:)+Hpp(:,:)
           ! total
           e1_pin = CZERO
-          do ispin=1,min(2,nspin)
-            i0 = (ispin-1)*(npol-1)*norb_ik
-            e1_pin = e1_pin+onebody_energy(H1,DM(:,:,ik,ispin),i0,i0,norb_ik,nmax_DM)
-          enddo
+          e1_pin = e1_pin + onebody_energy(H1,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(H1,DM(:,:,ik,2),ia,ia,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(H1,DM(:,:,ik,3),0,ia,norb_ik,nmax_DM)
+          e1_pin = e1_pin + onebody_energy(H1,DM(:,:,ik,4),ia,0,norb_ik,nmax_DM)
           print*, 'E1 with pin:', e1_pin
           ! transpose to account for expected row major format in esh5
           do ia=1,npol*norb_ik
