@@ -32,12 +32,12 @@ PROGRAM posthf
     angle1_ => angle1, angle2_ => angle2
   USE lsda_mod, ONLY: nspin
   USE constants, ONLY: autoev, bohr_radius_angs, pi, e2
-  USE ions_base, ONLY: ntyp=>nsp
+  USE ions_base, ONLY: ntyp=>nsp, ityp, nat
   USE KINDS, ONLY : DP
   !
   IMPLICIT NONE
   INTEGER :: ios, number_of_orbitals, ndet, nskipvir, read_from_h5
-  INTEGER :: iq, ik, regp, nt
+  INTEGER :: iq, ik, regp, nt, na
   REAL(DP) :: theta, phi
   REAL(DP) :: ncholmax, nextracut, thresh, eigcut_occ, eigcut, regkappa
   LOGICAL :: write_psir, expand_kp, debug, verbose 
@@ -221,6 +221,13 @@ PROGRAM posthf
     print*, 'atomic magnetic constraints'
     print*, '  lambda:', lambda
     print*, '  no_constrain_type:', no_constrain_type
+    ! release some constraints
+    do na=1,nat
+      nt = ityp(na)
+      if ( nt == no_constrain_type ) then
+        mcons(:,nt) = 0.d0
+      endif ! ityp
+    enddo ! na
     print*, '  mcons:'
     do nt=1,ntyp
       print*, (mcons(ik,nt),ik=1,nspin-1)
