@@ -22,7 +22,7 @@ MODULE onebody_hamiltonian
   SUBROUTINE getH1(h5id_orbs,h5id_hamil,dfft,e1,e1_so,e1_mf,e1_so_mf,tkin)
     USE scf, ONLY: vltot
     USE wvfct, ONLY: npwx, g2kin
-    USE wavefunctions, ONLY : psic, psic_nc
+    USE wavefunctions, ONLY : psic
     USE cell_base, ONLY: tpiba2
     USE becmod,   ONLY : becp, calbec, allocate_bec_type, deallocate_bec_type
     USE noncollin_module, ONLY : noncolin, npol,\
@@ -50,8 +50,8 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1,e1_so,tkin
     COMPLEX(DP), INTENT(OUT), OPTIONAL :: e1_mf,e1_so_mf
     !
-    COMPLEX(DP) :: ctemp, sup, sdn
-    INTEGER :: ia, ib, i0, no, error, npw, i1, j
+    COMPLEX(DP) :: ctemp, e1_pin
+    INTEGER :: ia, ib, i0, no, error, npw
     INTEGER :: ik,ibnd,ispin
     INTEGER :: norb_ik, mxorb
     COMPLEX(DP) :: CZERO
@@ -60,7 +60,6 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     REAL(DP), ALLOCATABLE :: v_of_r(:,:)
-    COMPLEX(DP) :: e1_pin, ecomp
     !
 
     CZERO = (0.d0,0.d0)
