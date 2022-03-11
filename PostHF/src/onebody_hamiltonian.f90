@@ -81,6 +81,12 @@ MODULE onebody_hamiltonian
     allocate( hpsi(npol*npwx, npol*mxorb) )
     CALL allocate_bec_type ( nkb, npol*mxorb, becp )
     write(*,*) 'USPP nkb:',nkb
+    if (i_cons==1) then
+      ALLOCATE( pointlist(dfft%nnr) )
+      ALLOCATE( factlist(dfft%nnr)  )
+      ALLOCATE( v_of_r(dfft%nnr,nspin) )
+      CALL make_pointlists()
+    endif
 
     ! set spin, only spin = 1 is used
     current_spin = 1
@@ -205,15 +211,11 @@ MODULE onebody_hamiltonian
           call errore('onebody', 'gamma b field not implemented', 1)
         endif
         ! partition real-space FFT grid among lattice sites
-        ALLOCATE( pointlist(dfft%nnr) )
-        ALLOCATE( factlist(dfft%nnr)  )
-        CALL make_pointlists()
         ! add magnetic field
         print*, 'creating external potential'
         !v%of_r(:, :) = 0.d0
         !CALL add_bfield( v%of_r, rho%of_r )
         !CALL report_mag()
-        ALLOCATE( v_of_r(dfft%nnr,nspin) )
         CALL add_initial_bfield(v_of_r)
         !
         print*, 'adding external potential'
@@ -300,6 +302,8 @@ MODULE onebody_hamiltonian
         !
       endif ! i_cons
       deallocate(H1)  
+      if (allocated(Hpin)) deallocate(Hpin)
+      if (allocated(H1copy)) deallocate(H1copy)
       !
     end do
     
@@ -310,8 +314,6 @@ MODULE onebody_hamiltonian
     if( allocated(pointlist) ) deallocate( pointlist )
     if( allocated(factlist) ) deallocate( factlist )
     if( allocated(v_of_r) ) deallocate( v_of_r )
-    IF( allocated(Hpin) ) deallocate( Hpin )
-    IF( allocated(H1copy) ) deallocate( H1copy )
  
   END SUBROUTINE getH1
 
