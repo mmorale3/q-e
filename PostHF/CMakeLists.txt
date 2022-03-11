@@ -8,6 +8,7 @@ set(src_posthf
     src/rpa_module.f90
     src/pyscf_driver.f90
     src/posthf_module.f90
+    src/add_initial_bfield.f90
    )
 qe_enable_cuda_fortran("${src_posthf}")
 

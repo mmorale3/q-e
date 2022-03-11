@@ -13,6 +13,7 @@ pp_utilities.o \
 twobody_hamiltonian.o \
 orbital_generators.o \
 onebody_hamiltonian.o \
+add_initial_bfield.o \
 mp2_module.o \
 pyscf_driver.o 
 
@@ -22,6 +23,7 @@ read_orbitals_from_file.o \
 twobody_hamiltonian.o \
 orbital_generators.o \
 onebody_hamiltonian.o \
+add_initial_bfield.o \
 mp2_module.o \
 pp_utilities.o
 
