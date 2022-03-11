@@ -121,6 +121,7 @@ MODULE rpa_module
 
     write(*,*)
     write(*,*) 'Starting RPA calculation. '
+    CALL start_clock ( 'rpa' )
 
     if(chol_type.ne.'full' .and. chol_type.ne.'mo') &
       call errore('rpa_cholesky_cpu','Unknown chol_type',1)
@@ -241,6 +242,7 @@ MODULE rpa_module
         ki = k_beg+ik-1
         ka = QKtoK2(Q,ki)  ! ka = ki-Q+G
 
+        CALL start_clock ( 'rpa_io' )
         if(chol_type == 'full') then
           !   3.a Read Cholesky matrix 
           call esh5_posthf_read_cholesky(h5id_hamil%id,Q-1,ki-1,ncholQ(Q),&
@@ -260,6 +262,7 @@ MODULE rpa_module
             enddo
           enddo
         endif
+        CALL stop_clock ( 'rpa_io' )
 
         do ispin=1,nspin
 
@@ -267,6 +270,7 @@ MODULE rpa_module
 
           if(chol_type == 'full') then
             !  3.b read MO matrix
+            CALL start_clock ( 'rpa_io' )
             call esh5_posthf_read_orbmat(h5id_orbmat%id,"CanOrbMat",9,  &
                         ki-1,ispin-1,MOs(1,1,1),ierror)
             if(ierror .ne. 0 ) &
@@ -275,7 +279,9 @@ MODULE rpa_module
                         ka-1,ispin-1,MOs(1,1,2),ierror)
             if(ierror .ne. 0 ) &
               call errore('rpa','error reading MOs',1)
+            CALL stop_clock ( 'rpa_io' )
 
+            CALL start_clock ( 'rpa_Lia' )
             ! process the occ-vir sector!
             ! Lia,P = sum_uv conj(M(u,i)) CholT(u,v,P) M(v,a)  
             Lia(:,:) = (0.d0,0.d0)
@@ -291,11 +297,15 @@ MODULE rpa_module
                        MOs(1,noccK(ka,ispin)+1,2),size(MOs,1), &
                        (0.d0,0.d0),Lia(1,n),noccK(ki,ispin)) 
             enddo
+            CALL stop_clock ( 'rpa_Lia' )
           elseif(chol_type == 'mo') then
             ! read Lp,ia and conjugate
+            CALL start_clock ( 'rpa_io' )
             call read_Lia_conjugated(Q,ki,ka,ispin,Pbounds(me_pool+1),nP)
+            CALL stop_clock ( 'rpa_io' )
           endif
 
+          CALL start_clock ( 'rpa_Qpq' )
           do ip=1,nproc_pool
 
             if( Pbounds(ip) > ncholQ(Q) ) exit
@@ -341,27 +351,17 @@ MODULE rpa_module
                 !  scale by eigenvalue factor 
                 do ia=1,n
                   do i=1,nPi
-                    !Ria(i,ia) = Ria(i,ia) * conjg(Bia(ia))
-                    Ria(i,ia) = Ria(i,ia) * Bia(ia)
+                    Ria(i,ia) = Ria(i,ia) * conjg(Bia(ia))
                   enddo
                 enddo
                 ! accumulate Tpq = sum conj(Liap) * Riap
-!                call zgemm('N','C',nP,nPi,n, &
-!                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
-!                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
-do ii=1,nP
-do jj=1,nPi
-do i=1,n
-  Tpq(ii,Pbounds(ip)+jj-1,iw) = Tpq(ii,Pbounds(ip)+jj-1,iw) + sx* &
-        conjg(Lia(ii,i)) * Ria(jj,i)
-enddo
-enddo
-enddo
+                call zgemm('N','C',nP,nPi,n, &
+                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
+                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
                 !  remove eigenvalue factor 
                 do ia=1,n
                   do i=1,nPi
-                    !Ria(i,ia) = Ria(i,ia) / conjg(Bia(ia))
-                    Ria(i,ia) = Ria(i,ia) / Bia(ia)
+                    Ria(i,ia) = Ria(i,ia) / conjg(Bia(ia))
                   enddo
                 enddo
               endif
@@ -369,9 +369,11 @@ enddo
             enddo ! iw
             !
           enddo ! ip - loop over procs in npool
+          CALL stop_clock ( 'rpa_Qpq' )
 
           ! now repeat the process for the vir-occ sector!
           if(chol_type=='full') then
+            CALL start_clock ( 'rpa_Lia' )
             ! Lia,P = sum_uv conj(M(u,a)) CholT(u,v,P) M(v,i)  
             Lia(:,:) = (0.d0,0.d0)
             ! T1(u,i,P) = sum_v CholT(u,v,P) M(v,i) 
@@ -388,9 +390,12 @@ enddo
                      T1((n-1)*norbK(ki)*noccK(ka,ispin)+1),norbK(ki), &
                      (0.d0,0.d0),Lia(1,n),nvirK(ki,ispin)) 
             enddo
+            CALL stop_clock ( 'rpa_Lia' )
           elseif(chol_type == 'mo') then
             ! read Lp,ai and conjugate
+            CALL start_clock ( 'rpa_io' )
             call read_Lai_conjugated(Q,ki,ka,ispin,Pbounds(me_pool+1),nP)
+            CALL stop_clock ( 'rpa_io' )
           endif
 
           do ip=1,nproc_pool
@@ -438,27 +443,17 @@ enddo
                 !  scale by eigenvalue factor 
                 do ia=1,n
                   do i=1,nPi
-                    !Ria(i,ia) = Ria(i,ia) * conjg(Bia(ia))
-                    Ria(i,ia) = Ria(i,ia) * Bia(ia)
+                    Ria(i,ia) = Ria(i,ia) * conjg(Bia(ia))
                   enddo
                 enddo
                 ! accumulate Tpq = sum Lpia * Rqia.T.conj()
-!                call zgemm('N','C',nP,nPi,n, &
-!                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
-!                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
-do ii=1,nP
-do jj=1,nPi
-do i=1,n
-  Tpq(ii,Pbounds(ip)+jj-1,iw) = Tpq(ii,Pbounds(ip)+jj-1,iw) + sx* &
-        conjg(Lia(ii,i)) * Ria(jj,i)
-enddo
-enddo
-enddo
+                call zgemm('N','C',nP,nPi,n, &
+                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
+                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
                 !  remove eigenvalue factor 
                 do ia=1,n
                   do i=1,nPi
-                    !Ria(i,ia) = Ria(i,ia) / conjg(Bia(ia))
-                    Ria(i,ia) = Ria(i,ia) / Bia(ia)
+                    Ria(i,ia) = Ria(i,ia) / conjg(Bia(ia))
                   enddo
                 enddo
               endif
@@ -475,6 +470,7 @@ enddo
 
       if(allocated(Chol)) deallocate( Chol )
 
+      CALL start_clock ( 'rpa_process_Q' )
       ! accumulate Qpq and calculate energy contributions
       ! round-robin distribution over cores
       do iw = 1, nfreq
@@ -494,6 +490,7 @@ enddo
         !
       enddo  
       call mp_barrier( intra_image_comm )
+      CALL stop_clock ( 'rpa_process_Q' )
       !
     enddo ! iq
     ! done
@@ -526,6 +523,16 @@ enddo
       call esh5_posthf_close_file(h5id_hamil%id) 
     elseif(chol_type=='mo') then
       call qeh5_close(qeh5_hamil)
+    endif
+
+    CALL stop_clock ( 'rpa' )
+    if(ionode) then
+      write(*,*) 'Timers: '
+      CALL print_clock ( 'rpa' )
+      CALL print_clock ( 'rpa_io' )
+      CALL print_clock ( 'rpa_Qpq' )
+      if(chol_type == 'full' )CALL print_clock ( 'rpa_Lia' )
+      CALL print_clock ( 'rpa_process_Q' )
     endif
     !
     ! deallocate
@@ -590,8 +597,7 @@ enddo
         ia=ia+1
         iaC = (i-1)*norbK(ka) + a
         do n=1,nPi
-          !Lia(n,ia) = conjg(buff(n,iaC))  
-          Lia(n,ia) = buff(n,iaC) 
+          Lia(n,ia) = conjg(buff(n,iaC))  
         enddo   
       enddo   
       enddo   
@@ -636,8 +642,7 @@ enddo
         ai=ai+1
         aiC = (a-1)*noccmax + i
         do n=1,nPi
-          !Lia(n,ai) = conjg(buff(n,aiC))
-          Lia(n,ai) = buff(n,aiC)
+          Lia(n,ai) = conjg(buff(n,aiC))
         enddo
       enddo
       enddo
@@ -688,203 +693,6 @@ enddo
 
     !
   END SUBROUTINE rpa_cholesky_cpu
-  
-  !  
-  ! Builds L[q][i][a][P] and V[P][Q] directly in MO basis and assembles
-  ! Q[P][Q][q][w] from this. Does not use/need Cholesky decomposition.
-  !
-  SUBROUTINE rpa_df(edrpa,dfft,esh5_orbitals,esh5_df,esosex) 
-    !
-    USE parallel_include
-    USE wvfct, ONLY: wg, et
-    USE klist, ONLY: wk
-    USE gvect, ONLY : ecutrho
-    USE ions_base,          ONLY : nat, ityp, ntyp => nsp
-    !
-    IMPLICIT NONE
-    !
-    TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
-    CHARACTER(len=*), INTENT(IN) :: esh5_orbitals, esh5_df
-    COMPLEX(DP), INTENT(OUT) :: edrpa
-    COMPLEX(DP), INTENT(IN), OPTIONAL :: esosex
-    !
-    TYPE(h5file_type) :: h5id_orbitals, h5id_df
-    !
-    LOGICAL :: get_sosex
-    INTEGER :: i, j, k, n, ip
-    INTEGER :: iq, Q, ka, ki, ia, ii, ispin, ik, ikk, iw, kk0 
-    INTEGER :: Naux, a_beg, a_end, n_a
-    INTEGER :: k_beg, k_end, nkloc, nia, ierror
-    INTEGER :: nfreq, maxnorb
-    INTEGER :: f_beg, f_end, nfloc
-    !
-    INTEGER :: nel(2), maxocc, maxvir
-    INTEGER, ALLOCATABLE :: noccK(:,:), nvirK(:,:)
-    INTEGER, ALLOCATABLE :: norbK(:) 
-    REAL(DP), ALLOCATABLE :: weight(:,:),eigval(:,:)
-    Complex(DP) :: ione
-    COMPLEX(DP), ALLOCATABLE :: Qpq(:,:,:) ! Q matrix 
-    COMPLEX(DP), ALLOCATABLE :: Ypq(:,:,:) ! Y matrix 
-    COMPLEX(DP), ALLOCATABLE :: Liap(:,:) ! left hand side of Qpq 
-    COMPLEX(DP), ALLOCATABLE :: Riap(:,:) ! right hand side of Qpq
-    COMPLEX(DP), ALLOCATABLE :: Bia(:)   ! term with eigenvalues 
-    COMPLEX(DP), ALLOCATABLE :: xfreq(:), wfreq(:)
-
-    ione = (0.d0,1.d0)
-    get_sosex = present(esosex)
-    get_sosex = .false.  ! turn off for now
-
-    ! open orbital file, read basic info
-
-    ! open df file, read basic info
-    Naux = 1
-
-    allocate( norbK(nksym) )
-
-    !  Partition k-points among MPI tasks
-    call fair_divide(k_beg,k_end,my_pool_id+1,npool,nksym)
-    nkloc   = k_end - k_beg + 1
-
-    ! 1. Read eigenvalues, fermi weights and determinte occupied/virtual partitioning
-    allocate( noccK(nksym,nspin), nvirK(nksym,nspin) )
-    allocate(eigval(maxnorb,nksym*nspin),weight(maxnorb,nksym*nspin))
-    weight(:,:) = 0.d0
-    eigval(:,:) = 0.d0
-    noccK(:,:)=0
-    nvirK(:,:)=0
-    do ispin=1,nspin
-      do ik=1,nksym
-        ikk = ik + nksym*(ispin-1)
-!        call esh5_posthf_read_et(h5id_hamil%id,ikk-1,eigval(1,ikk), &
-!                               weight(1,ikk),ierror)
-        if(ierror .ne. 0 ) &
-          call errore('mp2_g','error reading weights',1)
-      enddo
-    enddo
-    ! find number of electrons
-    call get_noccK(noccK,nel,maxnorb,nksym,nspin,weight,maxnorb)
-    write(*,*) ' Number of electrons per spin channel: ',(nel(i),i=1,nspin)
-    do ispin=1,nspin
-      nvirK(:,ispin) = norbK(:) - noccK(:,ispin)
-    enddo
-    maxocc = maxval(noccK(1:nksym,:))
-    maxvir = maxval(nvirK(1:nksym,:))
-
-    ! limiting to insulators for now, need changes in case of metals
-    do ispin=1,nspin
-      do ik=2,nksym
-        if(noccK(ik,ispin) .ne. noccK(1,ispin)) &
-          call errore('rpa','Error: Only insulators for now!!!',1)
-      enddo
-    enddo
-
-    ! Partition ia 
-    call fair_divide(a_beg,a_end,me_pool+1,nproc_pool,maxvir)
-    n_a   = a_end - a_beg + 1
-
-    allocate( Liap(maxocc*n_a,Naux), Riap(maxocc*n_a,Naux), Qpq(Naux,Naux,nfloc+1) )
-    allocate( Bia(maxocc*n_a) )
-    if( get_sosex ) then
-      allocate( Ypq(Naux,Naux,2) ) 
-    endif
-
-    ! 2. Generate frequency grid and weights
-    ! for simplicity now, use transform Gauss-Legendre grid
-    ! setup drequency integration grid    
-    nfreq = 1
-
-    !  Partition nfreq over all processors 
-    !  This is only used for storage purposes, since the frequency loop is
-    !  inside...
-    call fair_divide(f_beg,f_end,me_image+1,nproc_image,nfreq)
-    nfloc   = f_end - f_beg + 1
-
-    ! 3. Loop over Q 
-    edrpa = (0.d0,0.d0)
-!    if(get_sosex) esosex=(0.d0,0.d0)
-    Qpq(:,:,:) = (0.d0,0.d0)
-    do iq=1,nQuniq
-
-      Q = xQ(iq)
-      Qpq(:,:,:) = (0.d0,0.d0)
-
-      ! 
-      !   If Density fitting matrices are already calculated, read them
-      !   from file
-        
-      ! calculate Vpq 
-      ! Vpq
-
-      ! Vpq^{-1} 
-
-      do ik=1,nkloc
-
-        ki = k_beg+ik-1
-        ka = QKtoK2(Q,ki)  ! ka = ki-Q+G
-
-        ! not sure how spin comes in yet!
-        do ispin=1,nspin
-
-          kk0 = nksym*(ispin-1)
-
-          ! Lia,p  
-
-          do iw = 1, nfreq
-
-            ! setup Bia
-            ! MAM: This is wrong with partial occupations! Need to keep
-            ! partially occupied states in both occ and virtual sets!
-            ip = 0
-            do i = a_beg, a_end 
-              if( i <= nvirK(ka, ispin) ) then  
-                ia = noccK(ka,ispin) + i   ! need to keep track of origin or virtual states 
-                do ii = 1, noccK(ki,ispin)
-                  ! fi / [ (e(a) - e(i)) - iw ]
-                  ip = ip + 1
-                  Bia(ip) = weight(ii,ki+kk0) / ( (eigval(ia,ka+kk0) - eigval(ii,ki+kk0)) &
-                                          - ione*wfreq(iw) )
-                enddo
-              endif
-            enddo
-
-            !  scale by eigenvalue factor 
-            !  R(ia,P) = L(ia,P) * B(ia)
-            do i=1,Naux
-              do ia=1,ip
-                Riap(ia,i) = Liap(ia,i) * Bia(ia)
-              enddo
-            enddo
-
-            ! accumulate Qpq = sum conj(Liap) * Riap
-            call zgemm('C','N',Naux,Naux,ip, &
-                       (1.d0,0.d0),Riap,size(Riap,1),Liap,size(Liap,1), &
-                       (0.d0,0.d0),Qpq(1,1,1),Naux)
-
-            ! reduce Qpq locally if it is "your turn"
-            call mp_sum(Qpq(:,:,1),intra_image_comm)
-            if( iw >= f_beg .and. iw < f_end ) then
-              do j=1,Naux  
-                do i=1,Naux  
-                  Qpq(i,j,iw-f_beg+2) = Qpq(i,j,iw-f_beg+2) + Qpq(i,j,1)
-                enddo
-              enddo
-            endif
-
-          enddo
-
-        enddo ! ispin
-        !
-      enddo ! ik
-      !
-
-      ! Qpq(iw) for current Q available. Calculate contribution to Ec 
-
-    enddo ! iq
-    !
-    ! deallocate
-    
-    !
-  END SUBROUTINE rpa_df
   !  
   ! Qpq = -<P| v^{1/2}(r) x(r,r') v^{1/2}(r') |Q>
   ! Edmp2 = -Tr[Qpq^2]
