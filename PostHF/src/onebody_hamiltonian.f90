@@ -406,11 +406,11 @@ MODULE onebody_hamiltonian
     complex(DP), intent(out) :: H1loc(norb, norb)
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
     real(DP), intent(in) :: v_of_r(dfft%nnr)
-    complex(DP), intent(in) :: Orbitals(npw, norb)
+    complex(DP), intent(in) :: Orbitals(npwx, norb)
     integer, intent(in) :: norb, npw
     ! local variables
     COMPLEX(DP) :: CZERO, CONE, CNORM
-    COMPLEX(DP) :: hpsi_loc(npw, norb)
+    COMPLEX(DP) :: hpsi_loc(npwx, norb)
     COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
     integer :: ibnd
     CZERO = (0.d0,0.d0)
@@ -422,7 +422,7 @@ MODULE onebody_hamiltonian
     ! apply local potential in real space
     do ibnd = 1, norb
       psic (:) = (0.d0,0.d0)
-      psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npw,ibnd)
+      psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npwx,ibnd)
       !
       CALL invfft ('Wave', psic, dfft)
       !
@@ -432,8 +432,7 @@ MODULE onebody_hamiltonian
       !
       hpsi_loc(1:npw, ibnd) = hpsi_loc(1:npw, ibnd) + psic(dfft%nl(igksym(1:npw)))
     end do ! ibnd
-    CALL Overlap(norb,norb,npw,CNORM,Orbitals(1,1),npwx,&
-            hpsi_loc(1,1),npwx,CZERO,H1loc,norb,.false.,spsi)
+    CALL fillH1(H1loc, hpsi_loc, Orbitals, norb, norb, npw)
     IF( allocated(spsi) ) deallocate(spsi)
   end subroutine vlocalH1
 
