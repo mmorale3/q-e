@@ -432,7 +432,8 @@ MODULE onebody_hamiltonian
       !
       hpsi_loc(1:npw, ibnd) = hpsi_loc(1:npw, ibnd) + psic(dfft%nl(igksym(1:npw)))
     end do ! ibnd
-    CALL fillH1(H1loc, hpsi_loc, Orbitals, norb, norb, npw)
+    CALL Overlap(norb,norb,npw,CNORM,Orbitals(1,1),npwx,&
+            hpsi_loc(1,1),npwx,CZERO,H1loc,norb,.false.,spsi)
     IF( allocated(spsi) ) deallocate(spsi)
   end subroutine vlocalH1
 
