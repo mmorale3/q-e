@@ -365,6 +365,14 @@ MODULE onebody_hamiltonian
   end subroutine fillH1
 
   pure complex(DP) function contract_matrix(h1, dm, norb, nmax)
+    ! contract two square matrices \sum_{ij} h1_{ij} * dm_{ij} upto
+    !  the dimension of the smaller matrix.
+    !
+    ! Inputs:
+    !   h1 (matrix): (norb, norb)
+    !   dm (matrix): (nmax, nmax)
+    ! Return:
+    !   complex(DP): einsum contraction result
     !
     implicit none
     ! inputs and outputs
@@ -373,16 +381,9 @@ MODULE onebody_hamiltonian
     integer, intent(in) :: norb, nmax
     ! local variables
     integer :: mnorb
-    integer :: i,j
     mnorb = min(nmax,norb)
     !
-    !contract_matrix = sum(h1(1:mnorb,1:mnorb)*dm(1:mnorb,1:mnorb))
-    contract_matrix = (0.d0, 0.d0)
-    do i=1,mnorb
-    do j=1,mnorb
-      contract_matrix = contract_matrix + h1(i,j)*dm(i,j)
-    enddo
-    enddo
+    contract_matrix = sum(h1(1:mnorb,1:mnorb)*dm(1:mnorb,1:mnorb))
   end function
 
   pure complex(DP) function onebody_energy(h1, dm, ia0, ib0, norb, nmax)
