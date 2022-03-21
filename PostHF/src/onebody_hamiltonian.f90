@@ -422,7 +422,7 @@ MODULE onebody_hamiltonian
     ! apply local potential in real space
     do ibnd = 1, norb
       psic (:) = (0.d0,0.d0)
-      psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npwx,ibnd)
+      psic (dfft%nl(igksym(1:npw))) = Orbitals(1:npw,ibnd)
       !
       CALL invfft ('Wave', psic, dfft)
       !
