@@ -231,28 +231,27 @@ MODULE onebody_hamiltonian
           ! x
           CALL vlocalH1(Hpin, v_of_r(:,2), Orbitals, dfft, norb_ik, npw)
           e1_pin = CZERO
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,3),0,0,norb_ik,nmax_DM)
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,4),0,0,norb_ik,nmax_DM)
-          print*, 'E1 with xpin:', e1_pin
+          e1_pin = e1_pin + contract_matrix(Hpin,DM(:,:,ik,3),norb_ik,nmax_DM)
+          e1_pin = e1_pin + contract_matrix(Hpin,DM(:,:,ik,4),norb_ik,nmax_DM)
+          print*, 'E1 from xpin:', e1_pin
           H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + Hpin(:,:)
           H1(1:norb_ik,ia+1:) = H1(1:norb_ik,ia+1:) + Hpin(:,:)
           ! y
           CALL vlocalH1(Hpin, v_of_r(:,3), Orbitals, dfft, norb_ik, npw)
           e1_pin = CZERO
-          e1_pin = e1_pin + (0.d0,  1.d0)*onebody_energy(Hpin,DM(:,:,ik,3),0,0,norb_ik,nmax_DM)
-          e1_pin = e1_pin + (0.d0, -1.d0)*onebody_energy(Hpin,DM(:,:,ik,4),0,0,norb_ik,nmax_DM)
-          print*, 'E1 with ypin:', e1_pin
-          H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + (0.d0,  1.d0)*Hpin(:,:)
+          e1_pin = e1_pin + (0.d0, -1.d0)*contract_matrix(Hpin,DM(:,:,ik,3),norb_ik,nmax_DM)
+          e1_pin = e1_pin + (0.d0,  1.d0)*contract_matrix(Hpin,DM(:,:,ik,4),norb_ik,nmax_DM)
+          print*, 'E1 from ypin:', e1_pin
           H1(1:norb_ik,ia+1:) = H1(1:norb_ik,ia+1:) + (0.d0, -1.d0)*Hpin(:,:)
+          H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + (0.d0,  1.d0)*Hpin(:,:)
           ! z
           CALL vlocalH1(Hpin, v_of_r(:, 4), Orbitals, dfft, norb_ik, npw)
           e1_pin = CZERO
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
-          e1_pin = e1_pin - onebody_energy(Hpin,DM(:,:,ik,2),0,0,norb_ik,nmax_DM)
-          print*, 'E1 with zpin:', e1_pin
+          e1_pin = e1_pin + contract_matrix(Hpin,DM(:,:,ik,1),norb_ik,nmax_DM)
+          e1_pin = e1_pin - contract_matrix(Hpin,DM(:,:,ik,2),norb_ik,nmax_DM)
+          print*, 'E1 from zpin:', e1_pin
           H1(1:norb_ik,1:norb_ik) = H1(1:norb_ik,1:norb_ik) + Hpin(:,:)
           H1(ia+1:,ia+1:) = H1(ia+1:,ia+1:) - Hpin(:,:)
-          print*, 'E1 with zpin:', e1_pin
           ! total
           e1_pin = CZERO
           e1_pin = e1_pin + onebody_energy(H1,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
@@ -365,26 +364,46 @@ MODULE onebody_hamiltonian
     IF( allocated(spsi) ) deallocate(spsi)
   end subroutine fillH1
 
+  pure complex(DP) function contract_matrix(h1, dm, norb, nmax)
+    !
+    implicit none
+    ! inputs and outputs
+    complex(DP), intent(in) :: h1(norb,norb)
+    complex(DP), intent(in) :: dm(nmax,nmax)
+    integer, intent(in) :: norb, nmax
+    ! local variables
+    integer :: mnorb
+    integer :: i,j
+    mnorb = min(nmax,norb)
+    !
+    !contract_matrix = sum(h1(1:mnorb,1:mnorb)*dm(1:mnorb,1:mnorb))
+    contract_matrix = (0.d0, 0.d0)
+    do i=1,mnorb
+    do j=1,mnorb
+      contract_matrix = contract_matrix + h1(i,j)*dm(i,j)
+    enddo
+    enddo
+  end function
+
   pure complex(DP) function onebody_energy(h1, dm, ia0, ib0, norb, nmax)
     use noncollin_module, only : noncolin, npol
     USE lsda_mod, ONLY: nspin
     !
+    implicit none
     complex(DP), intent(in) :: h1(npol*norb,npol*norb)
     complex(DP), intent(in) :: dm(nmax,nmax)
     integer, intent(in) :: ia0, ib0, norb, nmax
     ! local variables
     integer :: no, ia, ib
-    real(DP) :: fac
-    fac=1.d0
-    if(nspin==1) fac=2.d0
     no = min(nmax,norb)
     !
     onebody_energy = (0.d0, 0.d0)
     do ib=1,no
       do ia=1,no
-        onebody_energy = onebody_energy + fac*h1(ia+ia0,ib+ib0)*dm(ia,ib)
+        onebody_energy = onebody_energy + h1(ia+ia0,ib+ib0)*dm(ia,ib)
       enddo
     enddo
+    if(nspin==1) onebody_energy = 2.d0*onebody_energy
   end function
 
   subroutine vlocalH1(H1loc, v_of_r, Orbitals, dfft, norb, npw)
@@ -392,7 +411,7 @@ MODULE onebody_hamiltonian
     !
     ! Inputs:
     !   v_of_r (array): (nnr,) local potential
-    !   Orbitals (array): (npw, norb) basis functions in PW
+    !   Orbitals (array): (npwx, norb) basis functions in PW
     !   dfft (fft_type_descriptor): discrete FFT mesh
     ! Return:
     !   H1loc (array): (norb, norb) one-body hamiltonian
@@ -402,6 +421,7 @@ MODULE onebody_hamiltonian
     USE wavefunctions, ONLY : psic
     USE wvfct, ONLY: npwx
     USE posthf_mod, ONLY: igksym, e2Ha
+    implicit none
     ! inputs and outputs
     complex(DP), intent(out) :: H1loc(norb, norb)
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
