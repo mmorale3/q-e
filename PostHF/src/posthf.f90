@@ -37,11 +37,12 @@ PROGRAM posthf
   !
   IMPLICIT NONE
   INTEGER :: ios, number_of_orbitals, ndet, nskipvir, read_from_h5
-  INTEGER :: iq, ik, regp, nt, na
+  INTEGER :: iq, ik, regp, nt, na, n_sigma
   REAL(DP) :: theta, phi
   REAL(DP) :: ncholmax, nextracut, thresh, eigcut_occ, eigcut, regkappa
   LOGICAL :: write_psir, expand_kp, debug, verbose 
   LOGICAL :: low_memory, update_qe_bands,get_hf,get_mp2,get_rpa,use_symm 
+  CHARACTER(len=256) :: self_energy_type
   REAL(DP) :: qnorm_
   ! directory for temporary files
   CHARACTER(len=256) :: outdir, out_prefix, h5_add_orbs, run_type, diag_type
@@ -53,6 +54,7 @@ PROGRAM posthf
             ndet, ncholmax,thresh, number_of_orbitals,eigcut_occ, eigcut, out_prefix, verbose, & 
             h5_add_orbs, nskipvir,low_memory, get_hf,get_mp2,get_rpa,use_symm, &
             regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment, &
+            self_energy_type, n_sigma, &
             lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire, &
             no_constrain_type, lambda, constrained_magnetization, starting_magnetization, &
             angle1, angle2
@@ -92,6 +94,8 @@ PROGRAM posthf
   get_hf=.true.
   get_mp2=.true.
   get_rpa=.true.
+  self_energy_type = 'diag'
+  n_sigma = -1
   regp=0
   regkappa=0.d0
   use_symm=.true.  
@@ -135,6 +139,8 @@ PROGRAM posthf
   CALL mp_bcast(get_hf, ionode_id, world_comm ) 
   CALL mp_bcast(get_mp2, ionode_id, world_comm ) 
   CALL mp_bcast(get_rpa, ionode_id, world_comm ) 
+  CALL mp_bcast(self_energy_type, ionode_id, world_comm ) 
+  CALL mp_bcast(n_sigma, ionode_id, world_comm ) 
   CALL mp_bcast(use_symm, ionode_id, world_comm ) 
   CALL mp_bcast(exxdiv_treatment, ionode_id, world_comm ) 
   CALL mp_bcast(regp, ionode_id, world_comm ) 
@@ -243,7 +249,7 @@ PROGRAM posthf
       qnorm_ = max(qnorm_, sqrt( sum((xk(:,ik)-xk(:,iq))**2) ))
     ENDDO
   ENDDO
-  if(qnorm_ > qnorm) call errore('posthf: qnorm guess is wrong.',1) 
+  if(qnorm_ > qnorm) call errore('posthf', 'posthf: qnorm guess is wrong.',1) 
   !
   CALL openfil_pp
   !
@@ -252,7 +258,7 @@ PROGRAM posthf
   CALL pp_posthf(out_prefix,number_of_orbitals, expand_kp, thresh, &
        eigcut, eigcut_occ, nextracut, ncholmax, ndet, nskipvir, run_type, diag_type, write_psir, update_qe_bands, &
        h5_add_orbs, read_from_h5, get_hf, get_mp2, get_rpa, use_symm, exxdiv_treatment, regp, regkappa, &
-       low_memory, verbose, debug)
+       self_energy_type, n_sigma, low_memory, verbose, debug)
   !
 #else
 !#error HDF5 flag neither enabled during configure nor added manually in make.inc
@@ -268,7 +274,8 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
                           occeigcut, nextracut,  &
                           ncmax, ndet, nskipvir, run_type, diag_type, &
                           write_psir, update_qe_bands, h5_add_orbs, read_from_h5, &
-                          get_hf, get_mp2, get_rpa, use_symm, exxdiv_treatment, regp, regkappa, low_memory, &
+                          get_hf, get_mp2, get_rpa, use_symm, exxdiv_treatment, &
+                          regp, regkappa, self_energy_type, n_sigma, low_memory, &
                           verbose, debug) 
 
   USE kinds, ONLY: DP
@@ -327,13 +334,14 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
 
   IMPLICIT NONE
   !  
-  INTEGER, INTENT(IN) :: norb_, regp
+  INTEGER, INTENT(IN) :: norb_, regp, n_sigma
   INTEGER, INTENT(INOUT) :: ndet, nskipvir, read_from_h5
   REAL(DP), INTENT(IN) :: ncmax, thresh, regkappa
   REAL(DP), INTENT(INOUT) :: occeigcut, eigcut, nextracut
   LOGICAL, INTENT(IN) :: expand_kp, debug, verbose, write_psir, use_symm
   LOGICAL, INTENT(IN) :: low_memory, update_qe_bands, get_hf, get_mp2, get_rpa
   CHARACTER(len=256), INTENT(IN) :: h5_add_orbs, run_type, diag_type, exxdiv_treatment
+  CHARACTER(len=256), INTENT(IN) :: self_energy_type 
   INTEGER :: ibnd, ik, j
   INTEGER :: ios, ierr, h5len,oldh5,ig_c,save_complex
   CHARACTER(256) :: tmp,tmp2,h5name,out_prefix,h5qeorbs
@@ -563,8 +571,14 @@ SUBROUTINE pp_posthf(out_prefix, norb_, expand_kp, thresh, eigcut, &
 
   elseif(TRIM(run_type) == 'rpa_driver') then
 
-    call pyscf_driver_rpa(out_prefix,TRIM(diag_type),read_from_h5,h5_add_orbs,&
-            eigcut,nextracut,thresh,ncmax,erpa)
+    call pyscf_driver_g0w0(out_prefix,TRIM(diag_type),read_from_h5,h5_add_orbs,&
+            eigcut,nextracut,thresh,ncmax,'none',0,erpa)
+    write(*,*) 'EdRPA (Ha):',erpa
+
+  elseif(TRIM(run_type) == 'g0w0_driver') then
+
+    call pyscf_driver_g0w0(out_prefix,TRIM(diag_type),read_from_h5,h5_add_orbs,&
+            eigcut,nextracut,thresh,ncmax,self_energy_type,n_sigma,erpa)
     write(*,*) 'EdRPA (Ha):',erpa
 
   else
