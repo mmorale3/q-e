@@ -42,6 +42,9 @@ MODULE onebody_hamiltonian
     USE posthf_mod, ONLY: nksym, xksym, igksym
     USE posthf_mod, ONLY: nmax_DM, DM, DM_mf
     USE read_orbitals_from_file, ONLY: h5file_type
+    USE qeh5_base_module
+    USE io_global, ONLY: ionode
+    USE io_files,  ONLY : prefix, tmp_dir
     !
     IMPLICIT NONE
     !
@@ -60,6 +63,9 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     REAL(DP), ALLOCATABLE :: v_of_r(:,:)
+    TYPE(qeh5_file) :: qeh5_meta
+    TYPE(qeh5_dataset) :: dset
+    CHARACTER(256) :: h5name
     !
 
     CZERO = (0.d0,0.d0)
@@ -86,6 +92,21 @@ MODULE onebody_hamiltonian
       ALLOCATE( factlist(dfft%nnr)  )
       ALLOCATE( v_of_r(dfft%nnr,nspin) )
       CALL make_pointlists()
+      if (ionode) then
+        h5name = TRIM( tmp_dir ) // TRIM( prefix ) // '.meta.h5'
+        CALL qeh5_openfile(qeh5_meta,h5name, 'write')
+        !
+        ! pointlist
+        CALL qeh5_set_space(dset, pointlist(1), RANK=1, DIMENSIONS=[dfft%nnr])
+        CALL qeh5_open_dataset(qeh5_meta, dset, ACTION='write', NAME='pointlist')
+        CALL qeh5_write_dataset(pointlist, dset)
+        ! factlist
+        CALL qeh5_set_space(dset, factlist(1), RANK=1, DIMENSIONS=[dfft%nnr])
+        CALL qeh5_open_dataset(qeh5_meta, dset, ACTION='write', NAME='factlist')
+        CALL qeh5_write_dataset(factlist, dset)
+        !
+        CALL qeh5_close(qeh5_meta)
+      endif
     endif
 
     ! set spin, only spin = 1 is used
