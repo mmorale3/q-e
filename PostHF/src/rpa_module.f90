@@ -116,7 +116,7 @@ MODULE rpa_module
     INTEGER :: nfreq, nfreq_loc, maxnorb, nchol_max, nabtot, noccmax
     REAL(DP) :: sx   ! spin degeneracy factor
     Complex(DP) :: ione
-    Complex(DP) :: edmp2
+    Complex(DP) :: edmp2, ctemp
     Real(DP) :: eF, etemp, dia
     !
     INTEGER :: nmax_sigma, n_sigma
@@ -414,7 +414,7 @@ MODULE rpa_module
                   ! ( fi - fa ) (e(a)-e(i)) / [ (e(a) - e(i))**2 + w*w ]
                   n = n + 1
                   dia = eigval(ii,ki+kk0) - eigval(ia,ka+kk0)
-                  Bia(n) = ( weight(ii,ki+kk0) - weight(ia,ka+kk0) ) * dia / &
+                  Bia(n) = 2.d0 * ( weight(ii,ki+kk0) - weight(ia,ka+kk0) ) * dia / &
                                   ( dia*dia + xfreq(iw)*xfreq(iw) ) 
                 enddo
               enddo
@@ -460,97 +460,6 @@ MODULE rpa_module
             !
           enddo ! ip - loop over procs in npool
           CALL stop_clock ( 'rpa_Qpq' )
-
-          ! now repeat the process for the vir-occ sector!
-          if(chol_type=='full') then
-            CALL start_clock ( 'rpa_Lia' )
-            ! Lia,P = sum_uv conj(M(u,a)) CholT(u,v,P) M(v,i)  
-            Lia(:,:) = (0.d0,0.d0)
-            ! T1(u,i,P) = sum_v CholT(u,v,P) M(v,i) 
-            do n=1,nP  
-              call zgemm('N','N',norbK(ki),noccK(ka,ispin),norbK(ka), &
-                     (1.d0,0.d0),CholT(1,n),norbK(ki), &
-                     MOs(1,1,2),size(MOs,1), &
-                     (0.d0,0.d0),T1((n-1)*norbK(ki)*noccK(ka,ispin)+1),norbK(ki))
-            enddo
-            ! Lia(a,i,P) = sum_u conj(M(u,a)) T1(u,i,P)
-            do n=1,nP  
-              call zgemm('C','N',nvirK(ki,ispin),noccK(ka,ispin),norbK(ki), &
-                     (1.d0,0.d0),MOs(1,noccK(ki,ispin)+1,1),size(MOs,1), &
-                     T1((n-1)*norbK(ki)*noccK(ka,ispin)+1),norbK(ki), &
-                     (0.d0,0.d0),Lia(1,n),nvirK(ki,ispin)) 
-            enddo
-            CALL stop_clock ( 'rpa_Lia' )
-          elseif(chol_type == 'mo') then
-            ! read Lp,ai and conjugate
-            CALL start_clock ( 'rpa_io' )
-            call read_Lai_conjugated(Q,ki,ka,ispin,Pbounds(me_pool+1),nP)
-            CALL stop_clock ( 'rpa_io' )
-          endif
-
-          do ip=1,nproc_pool
-
-            if( Pbounds(ip) > ncholQ(Q) ) exit
-            nPi = min( Pbounds(ip+1)-Pbounds(ip), ncholQ(Q)-Pbounds(ip)+1) 
-            if(nPi == 0) exit ! nothing to do, finish loop
-            ! broadcast Lia 
-            if( me_pool+1 == ip ) Ria(:,:) = Lia(:,:) 
-            call mp_bcast( Ria, ip-1, intra_pool_comm )
-
-            do iw = 1, nfreq
-
-              ! setup Bia
-              ! MAM: This is wrong with partial occupations! Need to keep
-              ! partially occupied states in both occ and virtual sets!
-              n = 0
-              do ii = 1, noccK(ka,ispin)
-                do ia = noccK(ki,ispin)+1,noccK(ki,ispin)+nvirK(ki,ispin) 
-                  ! fi / [ (e(a) - e(i)) - iw ]
-                  n = n + 1
-                  Bia(n) = weight(ii,ka+kk0) / ( (eigval(ia,ki+kk0) - eigval(ii,ka+kk0)) &
-                                          + ione*xfreq(iw) )
-                enddo
-              enddo
-
-              if(chol_type=='full') then
-                !  scale by eigenvalue factor 
-                do i=1,nPi
-                  do ia=1,n
-                    Ria(ia,i) = Ria(ia,i) * Bia(ia)
-                  enddo
-                enddo
-                ! accumulate Tpq = sum conj(Liap) * Riap
-                call zgemm('C','N',nP,nPi,n, &
-                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
-                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
-                !  remove eigenvalue factor 
-                do i=1,nPi
-                  do ia=1,n
-                    Ria(ia,i) = Ria(ia,i) / Bia(ia)
-                  enddo
-                enddo
-              elseif(chol_type == 'mo') then
-                !  scale by eigenvalue factor 
-                do ia=1,n
-                  do i=1,nPi
-                    Ria(i,ia) = Ria(i,ia) * conjg(Bia(ia))
-                  enddo
-                enddo
-                ! accumulate Tpq = sum Lpia * Rqia.T.conj()
-                call zgemm('N','C',nP,nPi,n, &
-                         (1.d0,0.d0)*sx,Lia,size(Lia,1),Ria,size(Ria,1), &
-                         (1.d0,0.d0),Tpq(1,Pbounds(ip),iw),size(Tpq,1))
-                !  remove eigenvalue factor 
-                do ia=1,n
-                  do i=1,nPi
-                    Ria(i,ia) = Ria(i,ia) / conjg(Bia(ia))
-                  enddo
-                enddo
-              endif
-
-            enddo ! iw
-            !
-          enddo ! ip - loop over procs in npool
 
         enddo ! ispin
         !
@@ -713,15 +622,16 @@ MODULE rpa_module
             if(nproc_pool > 1) CALL mp_sum ( T3, intra_pool_comm ) 
             CALL stop_clock ( 'g0w0_T2' )
 
-            ! sigma(nn',iw) += T3(nn',m) / (iw+iw'+eF-e(m,ka,ispin))
+            ! sigma(nn',iw1) += T3(nn',m) / (iw+iw1+eF-e(m,ka,ispin))
             CALL start_clock ( 'g0w0_sigma' )
             n=0
             do iw1=FreqBounds(me_pool+1),FreqBounds(me_pool+2)-1
               do i = 1,norbK(ka)
-                ! fi / [ iw + iw + eF - e(a) ]
+                ! (iw1 + eF - e(a)) / [ (iw1 + eF - e(a))**2 + w**2 ]
                 n = n + 1
-                T1(n) = wQ(iq) * wfreq(iw) * weight(i,ka+kk0) / tpi / &
-                        ( ione*(xfreq(iw) + xfreq(iw1)) + eF - eigval(i,ka+kk0) ) 
+                ctemp = ione*xfreq(iw1) + eF - eigval(i,ka+kk0)
+                T1(n) = -2.d0 * sx * wQ(iq) * wfreq(iw) * ctemp / &
+                        ( ctemp*ctemp + xfreq(iw)*xfreq(iw) ) / tpi 
               enddo
             enddo
             call zgemm('N','N',size(sigma,1),nfreq_loc,norbK(ka),  &
@@ -1013,7 +923,7 @@ MODULE rpa_module
     ! E = -1/(2*pi) int_w Tr[ ln(1-Q) + Q ]
     ! evaluating emp2 energy for now to debug 
     do i=1,naux
-      edrpa = edrpa - dx * Qpq(i,i) ! remember that Q has factor of -1.0 
+      edrpa = edrpa + dx * Qpq(i,i) ! remember that Q has factor of -1.0 
       do j=1,naux
         edmp2 = edmp2 - 0.5d0 * dx * Qpq(i,j) * Qpq(j,i)  
       enddo 
@@ -1022,7 +932,7 @@ MODULE rpa_module
     allocate(ipiv(naux))
     !
     do i=1,naux
-      Qpq(i,i) = Qpq(i,i)+1.d0
+      Qpq(i,i) = 1.d0 - Qpq(i,i)
     enddo
     CALL zgetrf (naux, naux, Qpq, size(Qpq,1), ipiv, info)
     CALL errore ('acfdt_energy_and_inv_Xv', 'error in ZGETRF', abs (info) )
