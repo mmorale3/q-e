@@ -796,8 +796,15 @@ add_custom_target(epw
         qe_epw_exe
     COMMENT
         "electron-Phonon Coupling with wannier functions")
+
 add_custom_target(all_currents
     DEPENDS
 	qe_qeheat_exe
     COMMENT
 	"QEHeat code to compute energy and electronic density currents")
+
+add_custom_target(posthf
+    DEPENDS
+        qe_posthf_exe
+    COMMENT
+        "converter for post HF codes")
