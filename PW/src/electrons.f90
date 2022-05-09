@@ -464,6 +464,8 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE scf_gpum,             ONLY : using_vrs
   USE device_fbuff_m,             ONLY : dev_buf, pin_buf
   USE input_parameters,     ONLY : lmoire
+  USE madelung,             ONLY : madelung_init, madelung_sum
+  USE constants,            ONLY : e2
   !
   IMPLICIT NONE
   !
@@ -514,6 +516,9 @@ SUBROUTINE electrons_scf ( printout, exxen )
   REAL(DP) :: etot_cmp_paw(nat,2,2)
   ! 
   REAL(DP) :: latvecs(3,3)
+  REAL(DP) :: vmad
+  INTEGER :: ndim
+  LOGICAL :: lmadelung
   !! auxiliary variables for grimme-d3
   INTEGER:: atnum(1:nat), na
   !! auxiliary variables for grimme-d3
@@ -545,7 +550,9 @@ SUBROUTINE electrons_scf ( printout, exxen )
   !
   if (lmoire) then
    ewld = 0.d0
+   ndim = 2
   else
+   ndim = 3
   IF ( do_comp_esm ) THEN
      ewld = esm_ewald()
   ELSE
@@ -553,6 +560,12 @@ SUBROUTINE electrons_scf ( printout, exxen )
                 omega, g, gg, ngm, gcutm, gstart, gamma_only, strf )
   ENDIF
   endif ! lmoire
+  lmadelung = .true.
+  if (lmadelung) then
+    call madelung_init(alat, at, ndim)
+    vmad = e2*madelung_sum(alat, at, bg)
+    ewld = ewld + vmad
+  end if ! lmadelung
   !
   IF ( llondon ) THEN
      elondon = energy_london( alat , nat , ityp , at ,bg , tau )
