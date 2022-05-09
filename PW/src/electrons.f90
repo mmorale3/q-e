@@ -466,6 +466,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE input_parameters,     ONLY : lmoire
   USE madelung,             ONLY : madelung_init, madelung_sum
   USE constants,            ONLY : e2
+  USE start_k,              ONLY : nk1, nk2, nk3
   !
   IMPLICIT NONE
   !
@@ -519,6 +520,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
   REAL(DP) :: vmad
   INTEGER :: ndim
   LOGICAL :: lmadelung
+  real(dp) :: at1(3,3), bg1(3,3)
   !! auxiliary variables for grimme-d3
   INTEGER:: atnum(1:nat), na
   !! auxiliary variables for grimme-d3
@@ -562,8 +564,21 @@ SUBROUTINE electrons_scf ( printout, exxen )
   endif ! lmoire
   lmadelung = .true.
   if (lmadelung) then
-    call madelung_init(alat, at, ndim)
-    vmad = e2*madelung_sum(alat, at, bg)
+    if (nkstot.eq.1) then
+      nk1 = 1
+      nk2 = 1
+      nk3 = 1
+    else if ((nk1*nk2*nk3).eq.0) then
+      call errore('electrons_scf', 'Must use auto kgrid for madelung correction', 1)
+    endif
+    at1(:,1) = at(:,1)*nk1
+    at1(:,2) = at(:,2)*nk2
+    at1(:,3) = at(:,3)*nk3
+    bg1(:,1) = bg(:,1)/nk1
+    bg1(:,2) = bg(:,2)/nk2
+    bg1(:,3) = bg(:,3)/nk3
+    call madelung_init(alat, at1, ndim)
+    vmad = e2*madelung_sum(alat, at1, bg1)
     ewld = ewld + vmad
   end if ! lmadelung
   !
