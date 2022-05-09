@@ -42,6 +42,9 @@ MODULE onebody_hamiltonian
     USE posthf_mod, ONLY: nksym, xksym, igksym
     USE posthf_mod, ONLY: nmax_DM, DM, DM_mf
     USE read_orbitals_from_file, ONLY: h5file_type
+    USE qeh5_base_module
+    USE io_global, ONLY: ionode
+    USE io_files,  ONLY : prefix, tmp_dir
     !
     IMPLICIT NONE
     !
@@ -60,6 +63,9 @@ MODULE onebody_hamiltonian
     COMPLEX(DP), ALLOCATABLE :: hpsi(:,:)
     COMPLEX(DP), ALLOCATABLE :: evc_(:,:)
     REAL(DP), ALLOCATABLE :: v_of_r(:,:)
+    TYPE(qeh5_file) :: qeh5_meta
+    TYPE(qeh5_dataset) :: dset
+    CHARACTER(256) :: h5name
     !
 
     CZERO = (0.d0,0.d0)
@@ -86,6 +92,21 @@ MODULE onebody_hamiltonian
       ALLOCATE( factlist(dfft%nnr)  )
       ALLOCATE( v_of_r(dfft%nnr,nspin) )
       CALL make_pointlists()
+      if (ionode) then
+        h5name = TRIM( tmp_dir ) // TRIM( prefix ) // '.meta.h5'
+        CALL qeh5_openfile(qeh5_meta,h5name, 'write')
+        !
+        ! pointlist
+        CALL qeh5_set_space(dset, pointlist(1), RANK=1, DIMENSIONS=[dfft%nnr])
+        CALL qeh5_open_dataset(qeh5_meta, dset, ACTION='write', NAME='pointlist')
+        CALL qeh5_write_dataset(pointlist, dset)
+        ! factlist
+        CALL qeh5_set_space(dset, factlist(1), RANK=1, DIMENSIONS=[dfft%nnr])
+        CALL qeh5_open_dataset(qeh5_meta, dset, ACTION='write', NAME='factlist')
+        CALL qeh5_write_dataset(factlist, dset)
+        !
+        CALL qeh5_close(qeh5_meta)
+      endif
     endif
 
     ! set spin, only spin = 1 is used
@@ -231,28 +252,27 @@ MODULE onebody_hamiltonian
           ! x
           CALL vlocalH1(Hpin, v_of_r(:,2), Orbitals, dfft, norb_ik, npw)
           e1_pin = CZERO
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,3),0,0,norb_ik,nmax_DM)
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,4),0,0,norb_ik,nmax_DM)
-          print*, 'E1 with xpin:', e1_pin
+          e1_pin = e1_pin + contract_matrix(Hpin,DM(:,:,ik,3),norb_ik,nmax_DM)
+          e1_pin = e1_pin + contract_matrix(Hpin,DM(:,:,ik,4),norb_ik,nmax_DM)
+          print*, 'E1 from xpin:', e1_pin
           H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + Hpin(:,:)
           H1(1:norb_ik,ia+1:) = H1(1:norb_ik,ia+1:) + Hpin(:,:)
           ! y
           CALL vlocalH1(Hpin, v_of_r(:,3), Orbitals, dfft, norb_ik, npw)
           e1_pin = CZERO
-          e1_pin = e1_pin + (0.d0,  1.d0)*onebody_energy(Hpin,DM(:,:,ik,3),0,0,norb_ik,nmax_DM)
-          e1_pin = e1_pin + (0.d0, -1.d0)*onebody_energy(Hpin,DM(:,:,ik,4),0,0,norb_ik,nmax_DM)
-          print*, 'E1 with ypin:', e1_pin
-          H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + (0.d0,  1.d0)*Hpin(:,:)
+          e1_pin = e1_pin + (0.d0, -1.d0)*contract_matrix(Hpin,DM(:,:,ik,3),norb_ik,nmax_DM)
+          e1_pin = e1_pin + (0.d0,  1.d0)*contract_matrix(Hpin,DM(:,:,ik,4),norb_ik,nmax_DM)
+          print*, 'E1 from ypin:', e1_pin
           H1(1:norb_ik,ia+1:) = H1(1:norb_ik,ia+1:) + (0.d0, -1.d0)*Hpin(:,:)
+          H1(ia+1:,1:norb_ik) = H1(ia+1:,1:norb_ik) + (0.d0,  1.d0)*Hpin(:,:)
           ! z
           CALL vlocalH1(Hpin, v_of_r(:, 4), Orbitals, dfft, norb_ik, npw)
           e1_pin = CZERO
-          e1_pin = e1_pin + onebody_energy(Hpin,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
-          e1_pin = e1_pin - onebody_energy(Hpin,DM(:,:,ik,2),0,0,norb_ik,nmax_DM)
-          print*, 'E1 with zpin:', e1_pin
+          e1_pin = e1_pin + contract_matrix(Hpin,DM(:,:,ik,1),norb_ik,nmax_DM)
+          e1_pin = e1_pin - contract_matrix(Hpin,DM(:,:,ik,2),norb_ik,nmax_DM)
+          print*, 'E1 from zpin:', e1_pin
           H1(1:norb_ik,1:norb_ik) = H1(1:norb_ik,1:norb_ik) + Hpin(:,:)
           H1(ia+1:,ia+1:) = H1(ia+1:,ia+1:) - Hpin(:,:)
-          print*, 'E1 with zpin:', e1_pin
           ! total
           e1_pin = CZERO
           e1_pin = e1_pin + onebody_energy(H1,DM(:,:,ik,1),0,0,norb_ik,nmax_DM)
@@ -365,26 +385,47 @@ MODULE onebody_hamiltonian
     IF( allocated(spsi) ) deallocate(spsi)
   end subroutine fillH1
 
+  pure complex(DP) function contract_matrix(h1, dm, norb, nmax)
+    ! contract two square matrices \sum_{ij} h1_{ij} * dm_{ij} upto
+    !  the dimension of the smaller matrix.
+    !
+    ! Inputs:
+    !   h1 (matrix): (norb, norb)
+    !   dm (matrix): (nmax, nmax)
+    ! Return:
+    !   complex(DP): einsum contraction result
+    !
+    implicit none
+    ! inputs and outputs
+    complex(DP), intent(in) :: h1(norb,norb)
+    complex(DP), intent(in) :: dm(nmax,nmax)
+    integer, intent(in) :: norb, nmax
+    ! local variables
+    integer :: mnorb
+    mnorb = min(nmax,norb)
+    !
+    contract_matrix = sum(h1(1:mnorb,1:mnorb)*dm(1:mnorb,1:mnorb))
+  end function
+
   pure complex(DP) function onebody_energy(h1, dm, ia0, ib0, norb, nmax)
     use noncollin_module, only : noncolin, npol
     USE lsda_mod, ONLY: nspin
     !
+    implicit none
     complex(DP), intent(in) :: h1(npol*norb,npol*norb)
     complex(DP), intent(in) :: dm(nmax,nmax)
     integer, intent(in) :: ia0, ib0, norb, nmax
     ! local variables
     integer :: no, ia, ib
-    real(DP) :: fac
-    fac=1.d0
-    if(nspin==1) fac=2.d0
     no = min(nmax,norb)
     !
     onebody_energy = (0.d0, 0.d0)
     do ib=1,no
       do ia=1,no
-        onebody_energy = onebody_energy + fac*h1(ia+ia0,ib+ib0)*dm(ia,ib)
+        onebody_energy = onebody_energy + h1(ia+ia0,ib+ib0)*dm(ia,ib)
       enddo
     enddo
+    if(nspin==1) onebody_energy = 2.d0*onebody_energy
   end function
 
   subroutine vlocalH1(H1loc, v_of_r, Orbitals, dfft, norb, npw)
@@ -392,7 +433,7 @@ MODULE onebody_hamiltonian
     !
     ! Inputs:
     !   v_of_r (array): (nnr,) local potential
-    !   Orbitals (array): (npw, norb) basis functions in PW
+    !   Orbitals (array): (npwx, norb) basis functions in PW
     !   dfft (fft_type_descriptor): discrete FFT mesh
     ! Return:
     !   H1loc (array): (norb, norb) one-body hamiltonian
@@ -402,15 +443,16 @@ MODULE onebody_hamiltonian
     USE wavefunctions, ONLY : psic
     USE wvfct, ONLY: npwx
     USE posthf_mod, ONLY: igksym, e2Ha
+    implicit none
     ! inputs and outputs
     complex(DP), intent(out) :: H1loc(norb, norb)
     TYPE ( fft_type_descriptor ), INTENT(IN) :: dfft
     real(DP), intent(in) :: v_of_r(dfft%nnr)
-    complex(DP), intent(in) :: Orbitals(npw, norb)
+    complex(DP), intent(in) :: Orbitals(npwx, norb)
     integer, intent(in) :: norb, npw
     ! local variables
     COMPLEX(DP) :: CZERO, CONE, CNORM
-    COMPLEX(DP) :: hpsi_loc(npw, norb)
+    COMPLEX(DP) :: hpsi_loc(npwx, norb)
     COMPLEX(DP), ALLOCATABLE :: spsi(:,:)
     integer :: ibnd
     CZERO = (0.d0,0.d0)
