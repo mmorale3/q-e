@@ -110,6 +110,7 @@ set(src_modules
     radial_gradients.f90 
     rgen.f90 
     recips.f90 
+    madelung.f90
     remove_tot_torque.f90
     set_hubbard_l.f90 
     set_hubbard_n.f90 
