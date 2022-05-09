@@ -463,7 +463,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE wvfct_gpum,           ONLY : using_et
   USE scf_gpum,             ONLY : using_vrs
   USE device_fbuff_m,             ONLY : dev_buf, pin_buf
-  USE input_parameters,     ONLY : lmoire
+  USE input_parameters,     ONLY : lmoire, lmadelung
   USE madelung,             ONLY : madelung_init, madelung_sum
   USE constants,            ONLY : e2
   USE start_k,              ONLY : nk1, nk2, nk3
@@ -519,7 +519,6 @@ SUBROUTINE electrons_scf ( printout, exxen )
   REAL(DP) :: latvecs(3,3)
   REAL(DP) :: vmad
   INTEGER :: ndim
-  LOGICAL :: lmadelung
   real(dp) :: at1(3,3), bg1(3,3)
   !! auxiliary variables for grimme-d3
   INTEGER:: atnum(1:nat), na
@@ -562,7 +561,6 @@ SUBROUTINE electrons_scf ( printout, exxen )
                 omega, g, gg, ngm, gcutm, gstart, gamma_only, strf )
   ENDIF
   endif ! lmoire
-  lmadelung = .true.
   if (lmadelung) then
     if (nkstot.eq.1) then
       nk1 = 1
@@ -579,6 +577,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
     bg1(:,3) = bg(:,3)/nk3
     call madelung_init(alat, at1, ndim)
     vmad = e2*madelung_sum(alat, at1, bg1)
+    write(stdout, 8999) vmad, ewld
     ewld = ewld + vmad
   end if ! lmadelung
   !
@@ -1144,6 +1143,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
 9101 FORMAT(/'     End of self-consistent calculation' )
 9110 FORMAT(/'     convergence has been achieved in ',i3,' iterations' )
 9120 FORMAT(/'     convergence NOT achieved after ',i3,' iterations: stopping' )
+8999 FORMAT(/'     Adding Madelung constant',F15.8,' to Ewald ',F15.8)
   !
   CONTAINS
      !
