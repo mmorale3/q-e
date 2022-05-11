@@ -577,8 +577,8 @@ SUBROUTINE electrons_scf ( printout, exxen )
     bg1(:,3) = bg(:,3)/nk3
     call madelung_init(alat, at1, ndim)
     vmad = e2*madelung_sum(alat, at1, bg1)
-    write(stdout, 8999) vmad, ewld
-    ewld = ewld + vmad
+    write(stdout, 8999) nelec, vmad, ewld
+    ewld = ewld + vmad*nelec
   end if ! lmadelung
   !
   IF ( llondon ) THEN
@@ -1143,7 +1143,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
 9101 FORMAT(/'     End of self-consistent calculation' )
 9110 FORMAT(/'     convergence has been achieved in ',i3,' iterations' )
 9120 FORMAT(/'     convergence NOT achieved after ',i3,' iterations: stopping' )
-8999 FORMAT(/'     Adding Madelung constant',F15.8,' to Ewald ',F15.8)
+8999 FORMAT(/'     Adding N=',F5.2,' times Madelung constant',F15.8,' to Ewald ',F15.8)
   !
   CONTAINS
      !
