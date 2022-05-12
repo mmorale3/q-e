@@ -463,7 +463,10 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE wvfct_gpum,           ONLY : using_et
   USE scf_gpum,             ONLY : using_vrs
   USE device_fbuff_m,             ONLY : dev_buf, pin_buf
-  USE input_parameters,     ONLY : lmoire
+  USE input_parameters,     ONLY : lmoire, lmadelung
+  USE madelung,             ONLY : madelung_init, madelung_sum
+  USE constants,            ONLY : e2
+  USE start_k,              ONLY : nk1, nk2, nk3
   !
   IMPLICIT NONE
   !
@@ -514,6 +517,9 @@ SUBROUTINE electrons_scf ( printout, exxen )
   REAL(DP) :: etot_cmp_paw(nat,2,2)
   ! 
   REAL(DP) :: latvecs(3,3)
+  REAL(DP) :: vmad
+  INTEGER :: ndim
+  real(dp) :: at1(3,3), bg1(3,3)
   !! auxiliary variables for grimme-d3
   INTEGER:: atnum(1:nat), na
   !! auxiliary variables for grimme-d3
@@ -545,7 +551,9 @@ SUBROUTINE electrons_scf ( printout, exxen )
   !
   if (lmoire) then
    ewld = 0.d0
+   ndim = 2
   else
+   ndim = 3
   IF ( do_comp_esm ) THEN
      ewld = esm_ewald()
   ELSE
@@ -553,6 +561,25 @@ SUBROUTINE electrons_scf ( printout, exxen )
                 omega, g, gg, ngm, gcutm, gstart, gamma_only, strf )
   ENDIF
   endif ! lmoire
+  if (lmadelung) then
+    if (nkstot.eq.1) then
+      nk1 = 1
+      nk2 = 1
+      nk3 = 1
+    else if ((nk1*nk2*nk3).eq.0) then
+      call errore('electrons_scf', 'Must use auto kgrid for madelung correction', 1)
+    endif
+    at1(:,1) = at(:,1)*nk1
+    at1(:,2) = at(:,2)*nk2
+    at1(:,3) = at(:,3)*nk3
+    bg1(:,1) = bg(:,1)/nk1
+    bg1(:,2) = bg(:,2)/nk2
+    bg1(:,3) = bg(:,3)/nk3
+    call madelung_init(alat, at1, ndim)
+    vmad = e2*madelung_sum(alat, at1, bg1)
+    write(stdout, 8999) nelec, vmad, ewld
+    ewld = ewld + vmad*nelec
+  end if ! lmadelung
   !
   IF ( llondon ) THEN
      elondon = energy_london( alat , nat , ityp , at ,bg , tau )
@@ -1116,6 +1143,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
 9101 FORMAT(/'     End of self-consistent calculation' )
 9110 FORMAT(/'     convergence has been achieved in ',i3,' iterations' )
 9120 FORMAT(/'     convergence NOT achieved after ',i3,' iterations: stopping' )
+8999 FORMAT(/'     Adding N=',F5.2,' times Madelung constant',F15.8,' to Ewald ',F15.8)
   !
   CONTAINS
      !

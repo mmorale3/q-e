@@ -637,6 +637,9 @@ MODULE input_parameters
         LOGICAL :: lmoire = .false.
         !! Use 2D moire potential
         !
+        LOGICAL :: lmadelung = .false.
+        !! Use Madelung correction to exxdiv
+        !
         ! the following are the needed parameters for 2D moire potential
         REAL(DP) :: amoire_in_ang = BOHR_RADIUS_ANGS
         !! moire lattice constant in Angstrom
@@ -698,7 +701,7 @@ MODULE input_parameters
              space_group, uniqueb, origin_choice, rhombohedral,               &
              zgate, relaxz, block, block_1, block_2, block_height,            &
              lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar,      &
-             epsmoire, vh_scale, vx_scale, no_constrain_type
+             epsmoire, vh_scale, vx_scale, no_constrain_type, lmadelung
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters
