@@ -1,6 +1,5 @@
 module iocc
   use kinds, only : dp
-  USE wvfct, ONLY: et
   implicit none
   private
 
@@ -32,6 +31,7 @@ contains
     integer :: i, j
     real(dp) :: tol, ai
     logical :: found
+    integer :: idx(n)
     tol = 1e-6 ! hard-code tolerance
     m = 0
     au(:) = 0
@@ -49,15 +49,20 @@ contains
         au(m) = ai
       endif
     enddo
-    call quicksort(au, 1, m)
+    do i=1,m
+      idx(i) = i
+    enddo
+    call quicksort(au, 1, m, idx)
   end subroutine unique
 
-  recursive subroutine quicksort(a, first, last)
+  recursive subroutine quicksort(a, first, last, idx)
     real(dp), intent(inout) :: a(:)
     integer, intent(in) :: first, last
+    integer, intent(inout), optional :: idx(:)
     ! local
-    integer i, j
+    integer :: i, j
     real(dp) :: x, t
+    integer :: k
   
     x = a( (first+last) / 2 )
     i = first
@@ -71,14 +76,22 @@ contains
        end do
        if (i >= j) exit
        t = a(i);  a(i) = a(j);  a(j) = t
+       if (present(idx)) then
+         k = idx(i); idx(i) = idx(j); idx(j) = k
+       endif
        i=i+1
        j=j-1
     end do
+    if (present(idx)) then
+    if (first < i-1) call quicksort(a, first, i-1, idx)
+    if (j+1 < last)  call quicksort(a, j+1, last, idx)
+    else ! no idx
     if (first < i-1) call quicksort(a, first, i-1)
     if (j+1 < last)  call quicksort(a, j+1, last)
+    endif ! present(idx)
   end subroutine quicksort
 
-  function n_of_mu(mxmu, mus, etv) result(nmu)
+  pure function n_of_mu(mxmu, mus, etv) result(nmu)
     real(dp) :: nmu(mxmu)
     integer, intent(in) :: mxmu
     real(dp), intent(in) :: mus(mxmu)
