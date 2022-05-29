@@ -4,7 +4,7 @@ module iocc
   private
 
   public :: fill_bands, n_of_mu
-  public :: unique
+  public :: unique, quicksort
 
 contains
 
