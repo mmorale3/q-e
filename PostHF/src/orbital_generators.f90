@@ -849,12 +849,13 @@ MODULE orbital_generators
   SUBROUTINE write_trial_wavefunction(h5id_orbs, h5id_hamil, dfft, &
                 nelmax,M,ndet,lowcut,highcut, h5wfn) 
     !
-    USE klist, ONLY: wk
+    USE klist, ONLY: wk, nelec, nelup, neldw
     USE becmod,   ONLY : becp, allocate_bec_type, deallocate_bec_type
     USE uspp,     ONLY : vkb, nkb
     USE paw_variables, ONLY : okpaw
     USE uspp,       ONLY : okvan
     USE fft_types, ONLY: fft_type_descriptor
+    USE iocc, ONLY: lsortocc, dnup, dndn
     ! 
     IMPLICIT NONE
     !
@@ -869,6 +870,7 @@ MODULE orbital_generators
     TYPE(h5file_type) :: h5id_wfn
     CHARACTER(len=10) :: ftype
     INTEGER :: i,j, ik, ispin, ikk, ia, n, mix_, err_,  nel, no
+    INTEGER :: mel ! maximum number of electrons per spin
     INTEGER :: non_coll, error, npw
     INTEGER :: maxl(2), Inel(2), maxnorb
     INTEGER, ALLOCATABLE :: nkocc(:,:)
@@ -899,8 +901,6 @@ MODULE orbital_generators
 
     ! generate modified occupation tensor for calculation of trial wfn
 !    nelmax = 0
-    Inel(:) = 0
-    neltot(:) = 0.d0
 !    do ispin=1,numspin
 !      do ik=1,nksym
 !        ikk = ik + nksym*(ispin-1)
@@ -917,6 +917,25 @@ MODULE orbital_generators
 !        enddo
 !      enddo
 !    enddo
+    neltot(:) = 0.d0
+    if (lsortocc) then ! occupy according to sorted eigenvalues
+      ! step 1: determine maximum number of electrons per spin
+      neltot(1) = nksym*nelec
+      if (nspin.eq.1) neltot(1) = neltot(1)/2
+      neltot(1) = neltot(1) + dnup
+      if (nspin.eq.2) then
+        neltot(1) = nksym*nelup + dnup
+        neltot(2) = nksym*neldw + dndn
+      endif
+      mel = max(neltot(1), neltot(2))/nksym + max(dnup, dndn)
+      if (mel>nbnd) call errore('orbgen', 'not enough orbitals', 1)
+      ! step 2: determine integer occupation from eigenvalues
+      allocate( wg_(mel,nksym,numspin) )
+      print*, neltot
+      print*, 'not implemented'
+      stop
+    else ! fractional weight based occupation
+    Inel(:) = 0
     allocate( wg_(nelmax,nksym,numspin) )
     wg_(:,:,:) = 0.d0  
     do ispin=1,numspin
@@ -942,6 +961,8 @@ MODULE orbital_generators
         enddo
       enddo
     enddo
+    print*, neltot
+    endif ! lsortocc
 
     allocate( Orbs(npol*npwx, nelmax) )
 
@@ -1076,8 +1097,7 @@ MODULE orbital_generators
     ! systems
     if( ndet > 1 ) then
         call errore('write_trial_wavefunction','ndet > 1 not yet implemented.',1)
-    else
-      ! "fix" occupations for ndet=1 
+    elseif (.not.lsortocc) then ! "fix" occupations for ndet=1 
       do ispin=1,numspin
         do while(Inel(ispin)+0.1d0 < neltot(ispin))
           maxl = maxloc( wg_(:,:,ispin), mask=wg_(:,:,ispin).lt.0.95d0 )
