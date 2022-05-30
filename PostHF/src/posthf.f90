@@ -186,6 +186,9 @@ PROGRAM posthf
   CALL start_clock ( 'read_file' )
   CALL read_file
   CALL stop_clock ( 'read_file' )
+  ! check inputs
+  if (lsortocc.and.(dndn .ne. 0).and.(nspin.ne.2)) call errore('posthf', &
+   & 'number of down electrons is defined for nspin=2 only', 1)
 
   ! ntyp is initialized by read_file
   if (noncolin) then
