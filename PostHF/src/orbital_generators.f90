@@ -899,6 +899,8 @@ MODULE orbital_generators
     if(me_image .ne. root_image) return
 
     allocate( nkocc(nksym,numspin) )
+    allocate( wg_(nelmax,nksym,numspin) )
+    wg_(:,:,:) = 0.d0  
 
     ! generate modified occupation tensor (wg_) for calculation of trial wfn
     neltot(:) = 0.d0
@@ -912,27 +914,29 @@ MODULE orbital_generators
         neltot(2) = nksym*neldw + dndn
       endif
       ! step 2: determine integer occupation from eigenvalues
-      allocate( wg_(nelmax,nksym,numspin) )
       allocate( etv(nelmax*nksym) )
       allocate( idx(nelmax*nksym) )
       do ispin=1,numspin
         ik = nksym*(ispin-1)+1
         ikk = ik+nksym-1
         etv = reshape(et(:nelmax,ik:ikk), (/nelmax*nksym/))
+        ! argsort(etv)
         do ia=1,nelmax*nksym
           idx(ia) = ia
         enddo
         call quicksort(etv, 1, nelmax*nksym, idx)
+        ! set weights
         do ia=1,int(neltot(ispin))
-          j = idx(ia)/nelmax+1
+          ! 1D to 2D index
+          j = (idx(ia)-1)/nelmax + 1
           i = idx(ia)-nelmax*(j-1)
           wg_(i, j, ispin) = 1.d0
         enddo
+        n = sum(wg_(:,:,ispin))
+        if (n.ne.neltot(ispin)) call errore('og', 'set weights failed', 1)
       enddo
     else ! fractional weight based occupation
     Inel(:) = 0
-    allocate( wg_(nelmax,nksym,numspin) )
-    wg_(:,:,:) = 0.d0  
     do ispin=1,numspin
       do ik=1,nksym
         ikk = ik + nksym*(ispin-1)
