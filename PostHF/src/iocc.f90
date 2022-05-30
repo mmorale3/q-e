@@ -1,10 +1,14 @@
 module iocc
   use kinds, only : dp
   implicit none
+  logical :: lsortocc = .false.
+  integer :: dnup = 0
+  integer :: dndn = 0
   private
 
   public :: fill_bands, n_of_mu
   public :: unique, quicksort
+  public :: lsortocc, dnup, dndn
 
 contains
 
