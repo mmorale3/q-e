@@ -1020,6 +1020,9 @@ END SUBROUTINE find_Q_symm
 SUBROUTINE get_nelmax(nbnd,nk,ns,wk,n1,wg,nelmax)
   !
   USE KINDS, ONLY : DP
+  USE lsda_mod, ONLY: nspin
+  USE klist, ONLY: nelec, nelup, neldw
+  use iocc, only : lsortocc, dnup, dndn
   !
   IMPLICIT NONE
   !
@@ -1029,8 +1032,21 @@ SUBROUTINE get_nelmax(nbnd,nk,ns,wk,n1,wg,nelmax)
   !
   INTEGER :: ispin,ik,ikk,ia
   REAL(DP) :: scl  
+  integer :: neltot(2)
   !  
   nelmax = 0
+  if (lsortocc) then ! determine from input
+    neltot(:) = 0
+    neltot(1) = nint(nelec) ! nspin 4
+    if (nspin.eq.1) neltot(1) = neltot(1)/2
+    neltot(1) = neltot(1) + dnup
+    if (nspin.eq.2) then
+      neltot(1) = nint(nelup) + dnup
+      neltot(2) = nint(neldw) + dndn
+    endif
+    nelmax = max(neltot(1), neltot(2))
+    if (nelmax>nbnd) call errore('get_nelmax', 'not enough orbitals', 1)
+  else ! determine from fractional weights
   do ispin=1,ns
     do ik=1,nk
       ikk = ik + nk*(ispin-1)
@@ -1046,6 +1062,7 @@ SUBROUTINE get_nelmax(nbnd,nk,ns,wk,n1,wg,nelmax)
       enddo
     enddo
   enddo
+  endif ! lsortocc
 END SUBROUTINE get_nelmax
 !-----------------------------------------------------------------------
 
