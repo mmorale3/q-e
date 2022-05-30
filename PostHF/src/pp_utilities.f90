@@ -1037,14 +1037,14 @@ SUBROUTINE get_nelmax(nbnd,nk,ns,wk,n1,wg,nelmax)
   nelmax = 0
   if (lsortocc) then ! determine from input
     neltot(:) = 0
-    neltot(1) = nint(nelec) ! nspin 4
+    neltot(1) = nk*nint(nelec) ! nspin 4
     if (nspin.eq.1) neltot(1) = neltot(1)/2
     neltot(1) = neltot(1) + dnup
     if (nspin.eq.2) then
-      neltot(1) = nint(nelup) + dnup
-      neltot(2) = nint(neldw) + dndn
+      neltot(1) = nk*nint(nelup) + dnup
+      neltot(2) = nk*nint(neldw) + dndn
     endif
-    nelmax = max(neltot(1), neltot(2))
+    nelmax = ceiling(max(neltot(1), neltot(2))*1.d0/nk)
     if (nelmax>nbnd) call errore('get_nelmax', 'not enough orbitals', 1)
   else ! determine from fractional weights
   do ispin=1,ns
