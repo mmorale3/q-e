@@ -870,7 +870,6 @@ MODULE orbital_generators
     TYPE(h5file_type) :: h5id_wfn
     CHARACTER(len=10) :: ftype
     INTEGER :: i,j, ik, ispin, ikk, ia, n, mix_, err_,  nel, no
-    INTEGER :: mel ! maximum number of electrons per spin
     INTEGER :: non_coll, error, npw
     INTEGER :: maxl(2), Inel(2), maxnorb
     INTEGER, ALLOCATABLE :: nkocc(:,:)
@@ -901,27 +900,10 @@ MODULE orbital_generators
 
     allocate( nkocc(nksym,numspin) )
 
-    ! generate modified occupation tensor for calculation of trial wfn
-!    nelmax = 0
-!    do ispin=1,numspin
-!      do ik=1,nksym
-!        ikk = ik + nksym*(ispin-1)
-!        if(abs(wk(ikk))>1.d-10) then
-!            scl = 1.d0/wk(ikk)
-!        else 
-!            scl = 1.d0
-!        endif
-!        do ia=1,nbnd
-!          ! MAM: for high-T or for highly degenerate states this needs to be reduced
-!          ! maybe make it a parameter that defaults to 0.01
-!          if( abs(wg(ia,ikk)*scl) > 0.01d0 .and. ia > nelmax )  &
-!            nelmax = ia
-!        enddo
-!      enddo
-!    enddo
+    ! generate modified occupation tensor (wg_) for calculation of trial wfn
     neltot(:) = 0.d0
     if (lsortocc) then ! occupy according to sorted eigenvalues
-      ! step 1: determine maximum number of electrons per spin
+      ! step 1: count total number of electrons per spin
       neltot(1) = nksym*nelec
       if (nspin.eq.1) neltot(1) = neltot(1)/2
       neltot(1) = neltot(1) + dnup
