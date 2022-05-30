@@ -855,7 +855,7 @@ MODULE orbital_generators
     USE paw_variables, ONLY : okpaw
     USE uspp,       ONLY : okvan
     USE fft_types, ONLY: fft_type_descriptor
-    USE iocc, ONLY: lsortocc, dnup, dndn
+    USE iocc, ONLY: lsortocc, dnup, dndn, quicksort
     ! 
     IMPLICIT NONE
     !
@@ -882,6 +882,8 @@ MODULE orbital_generators
     COMPLEX(DP), ALLOCATABLE :: spsi(:,:) 
     COMPLEX(DP), ALLOCATABLE :: Ov(:,:)  ! temporary matrix 
     COMPLEX(DP), ALLOCATABLE :: T1(:,:)  ! temporary matrix 
+    real(dp), allocatable :: etv(:)
+    integer, allocatable :: idx(:)
 
     nmax_DM=0
     if(present(h5wfn)) then
@@ -927,13 +929,24 @@ MODULE orbital_generators
         neltot(1) = nksym*nelup + dnup
         neltot(2) = nksym*neldw + dndn
       endif
-      mel = max(neltot(1), neltot(2))/nksym + max(dnup, dndn)
-      if (mel>nbnd) call errore('orbgen', 'not enough orbitals', 1)
       ! step 2: determine integer occupation from eigenvalues
-      allocate( wg_(mel,nksym,numspin) )
-      print*, neltot
-      print*, 'not implemented'
-      stop
+      allocate( wg_(nelmax,nksym,numspin) )
+      allocate( etv(nelmax*nksym) )
+      allocate( idx(nelmax*nksym) )
+      do ispin=1,numspin
+        ik = nksym*(ispin-1)+1
+        ikk = ik+nksym-1
+        etv = reshape(et(:nelmax,ik:ikk), (/nelmax*nksym/))
+        do ia=1,nelmax*nksym
+          idx(ia) = ia
+        enddo
+        call quicksort(etv, 1, nelmax*nksym, idx)
+        do ia=1,int(neltot(ispin))
+          j = idx(ia)/nelmax+1
+          i = idx(ia)-nelmax*(j-1)
+          wg_(i, j, ispin) = 1.d0
+        enddo
+      enddo
     else ! fractional weight based occupation
     Inel(:) = 0
     allocate( wg_(nelmax,nksym,numspin) )
@@ -961,7 +974,6 @@ MODULE orbital_generators
         enddo
       enddo
     enddo
-    print*, neltot
     endif ! lsortocc
 
     allocate( Orbs(npol*npwx, nelmax) )
