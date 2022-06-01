@@ -849,12 +849,13 @@ MODULE orbital_generators
   SUBROUTINE write_trial_wavefunction(h5id_orbs, h5id_hamil, dfft, &
                 nelmax,M,ndet,lowcut,highcut, h5wfn) 
     !
-    USE klist, ONLY: wk
+    USE klist, ONLY: wk, nelec, nelup, neldw
     USE becmod,   ONLY : becp, allocate_bec_type, deallocate_bec_type
     USE uspp,     ONLY : vkb, nkb
     USE paw_variables, ONLY : okpaw
     USE uspp,       ONLY : okvan
     USE fft_types, ONLY: fft_type_descriptor
+    USE iocc, ONLY: lsortocc, dnup, dndn, quicksort
     ! 
     IMPLICIT NONE
     !
@@ -880,6 +881,8 @@ MODULE orbital_generators
     COMPLEX(DP), ALLOCATABLE :: spsi(:,:) 
     COMPLEX(DP), ALLOCATABLE :: Ov(:,:)  ! temporary matrix 
     COMPLEX(DP), ALLOCATABLE :: T1(:,:)  ! temporary matrix 
+    real(dp), allocatable :: etv(:)
+    integer, allocatable :: idx(:)
 
     nmax_DM=0
     if(present(h5wfn)) then
@@ -896,29 +899,44 @@ MODULE orbital_generators
     if(me_image .ne. root_image) return
 
     allocate( nkocc(nksym,numspin) )
-
-    ! generate modified occupation tensor for calculation of trial wfn
-!    nelmax = 0
-    Inel(:) = 0
-    neltot(:) = 0.d0
-!    do ispin=1,numspin
-!      do ik=1,nksym
-!        ikk = ik + nksym*(ispin-1)
-!        if(abs(wk(ikk))>1.d-10) then
-!            scl = 1.d0/wk(ikk)
-!        else 
-!            scl = 1.d0
-!        endif
-!        do ia=1,nbnd
-!          ! MAM: for high-T or for highly degenerate states this needs to be reduced
-!          ! maybe make it a parameter that defaults to 0.01
-!          if( abs(wg(ia,ikk)*scl) > 0.01d0 .and. ia > nelmax )  &
-!            nelmax = ia
-!        enddo
-!      enddo
-!    enddo
     allocate( wg_(nelmax,nksym,numspin) )
     wg_(:,:,:) = 0.d0  
+
+    ! generate modified occupation tensor (wg_) for calculation of trial wfn
+    neltot(:) = 0.d0
+    if (lsortocc) then ! occupy according to sorted eigenvalues
+      ! step 1: count total number of electrons per spin
+      neltot(1) = nksym*nelec
+      if (nspin.eq.1) neltot(1) = neltot(1)/2
+      neltot(1) = neltot(1) + dnup
+      if (nspin.eq.2) then
+        neltot(1) = nksym*nelup + dnup
+        neltot(2) = nksym*neldw + dndn
+      endif
+      ! step 2: determine integer occupation from eigenvalues
+      allocate( etv(nelmax*nksym) )
+      allocate( idx(nelmax*nksym) )
+      do ispin=1,numspin
+        ik = nksym*(ispin-1)+1
+        ikk = ik+nksym-1
+        etv = reshape(et(:nelmax,ik:ikk), (/nelmax*nksym/))
+        ! argsort(etv)
+        do ia=1,nelmax*nksym
+          idx(ia) = ia
+        enddo
+        call quicksort(etv, 1, nelmax*nksym, idx)
+        ! set weights
+        do ia=1,int(neltot(ispin))
+          ! 1D to 2D index
+          j = (idx(ia)-1)/nelmax + 1
+          i = idx(ia)-nelmax*(j-1)
+          wg_(i, j, ispin) = 1.d0
+        enddo
+        n = sum(wg_(:,:,ispin))
+        if (n.ne.neltot(ispin)) call errore('og', 'set weights failed', 1)
+      enddo
+    else ! fractional weight based occupation
+    Inel(:) = 0
     do ispin=1,numspin
       do ik=1,nksym
         ikk = ik + nksym*(ispin-1)
@@ -942,6 +960,7 @@ MODULE orbital_generators
         enddo
       enddo
     enddo
+    endif ! lsortocc
 
     allocate( Orbs(npol*npwx, nelmax) )
 
@@ -1076,8 +1095,7 @@ MODULE orbital_generators
     ! systems
     if( ndet > 1 ) then
         call errore('write_trial_wavefunction','ndet > 1 not yet implemented.',1)
-    else
-      ! "fix" occupations for ndet=1 
+    elseif (.not.lsortocc) then ! "fix" occupations for ndet=1 
       do ispin=1,numspin
         do while(Inel(ispin)+0.1d0 < neltot(ispin))
           maxl = maxloc( wg_(:,:,ispin), mask=wg_(:,:,ispin).lt.0.95d0 )

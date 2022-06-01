@@ -3,6 +3,7 @@ set(src_posthf
     src/read_orbitals_from_file.f90
     src/twobody_hamiltonian.f90
     src/orbital_generators.f90
+    src/iocc.f90
     src/onebody_hamiltonian.f90
     src/mp2_module.f90
     src/rpa_module.f90
