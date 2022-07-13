@@ -907,12 +907,15 @@ MODULE orbital_generators
     if (lsortocc) then ! occupy according to sorted eigenvalues
       ! step 1: count total number of electrons per spin
       neltot(1) = nksym*nelec
-      if (nspin.eq.1) neltot(1) = nint(neltot(1)/2)
-      neltot(1) = nint(neltot(1) + dnup)
+      if (nspin.eq.1) neltot(1) = neltot(1)/2
+      neltot(1) = neltot(1) + dnup
       if (nspin.eq.2) then
-        neltot(1) = nint(nksym*nelup + dnup)
-        neltot(2) = nint(nksym*neldw + dndn)
+        neltot(1) = nksym*nelup + dnup
+        neltot(2) = nksym*neldw + dndn
       endif
+      do ispin=1,numspin
+        neltot(ispin) = nint(neltot(ispin))
+      enddo
       ! step 2: determine integer occupation from eigenvalues
       allocate( etv(nelmax*nksym) )
       allocate( idx(nelmax*nksym) )
