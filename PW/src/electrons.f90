@@ -271,9 +271,9 @@ SUBROUTINE electrons()
               WRITE(stdout,'(5x,a,1e12.3)') "BEWARE: negative dexx:", dexx
               dexx = ABS ( dexx )
            !ELSE
-           !   CALL errore( 'electrons', 'dexx is negative! &
-           !        & Check that exxdiv_treatment is appropriate for the system,&
-           !        & or ecutfock may be too low', 1 )
+              CALL errore( 'electrons', 'dexx is negative! &
+                   & Check that exxdiv_treatment is appropriate for the system,&
+                   & or ecutfock may be too low', 1 )
            !ENDIF
         ENDIF
         !
