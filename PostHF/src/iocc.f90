@@ -2,13 +2,16 @@ module iocc
   use kinds, only : dp
   implicit none
   logical :: lsortocc = .false.
+  logical :: lgcocc = .false.
+  ! Fermi energy for grand-canonical occupation
+  real(dp) :: gcef_in_ry ! how to set default?
   integer :: dnup = 0
   integer :: dndn = 0
   private
 
-  public :: fill_bands, n_of_mu
+  !public :: fill_bands, n_of_mu
   public :: unique, quicksort
-  public :: lsortocc, dnup, dndn
+  public :: lsortocc, lgcocc, gcef_in_ry, dnup, dndn
 
 contains
 

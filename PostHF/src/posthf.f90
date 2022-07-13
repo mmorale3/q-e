@@ -26,7 +26,7 @@ PROGRAM posthf
                     eha_    => eha,    &
                     vmoire_ => vmoire, &
                     pmoire_ => pmoire
-  USE iocc, ONLY : lsortocc, dnup, dndn
+  USE iocc, ONLY : lsortocc, lgcocc, gcef_in_ry, dnup, dndn
   USE input_parameters, ONLY : constrained_magnetization, starting_magnetization, &
     no_constrain_type, lambda, angle1, angle2
   USE noncollin_module, ONLY : noncolin, i_cons, mcons, lambda_ => lambda, npol, &
@@ -56,7 +56,7 @@ PROGRAM posthf
             regp,regkappa,read_from_h5,nextracut, update_qe_bands, run_type, diag_type, exxdiv_treatment, &
             lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar, epsmoire, &
             no_constrain_type, lambda, constrained_magnetization, starting_magnetization, &
-            angle1, angle2, lsortocc, dnup, dndn
+            angle1, angle2, lsortocc, lgcocc, gcef_in_ry, dnup, dndn
 #ifdef __MPI
   CALL mp_startup ( )
 #endif
@@ -153,6 +153,8 @@ PROGRAM posthf
   CALL mp_bcast(angle1, ionode_id, world_comm)
   CALL mp_bcast(angle2, ionode_id, world_comm)
   CALL mp_bcast(lsortocc, ionode_id, world_comm)
+  CALL mp_bcast(lgcocc, ionode_id, world_comm)
+  CALL mp_bcast(gcef_in_ry, ionode_id, world_comm)
   CALL mp_bcast(dnup, ionode_id, world_comm)
   CALL mp_bcast(dndn, ionode_id, world_comm)
   ! 

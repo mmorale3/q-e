@@ -855,7 +855,7 @@ MODULE orbital_generators
     USE paw_variables, ONLY : okpaw
     USE uspp,       ONLY : okvan
     USE fft_types, ONLY: fft_type_descriptor
-    USE iocc, ONLY: lsortocc, dnup, dndn, quicksort
+    USE iocc, ONLY: lsortocc, lgcocc, gcef_in_ry, dnup, dndn, quicksort
     ! 
     IMPLICIT NONE
     !
@@ -869,12 +869,12 @@ MODULE orbital_generators
     !
     TYPE(h5file_type) :: h5id_wfn
     CHARACTER(len=10) :: ftype
-    INTEGER :: i,j, ik, ispin, ikk, ia, n, mix_, err_,  nel, no
+    INTEGER :: i,j, ik, ispin, ikk, ia, n, mix_, err_,  nel, mel, no
     INTEGER :: non_coll, error, npw
     INTEGER :: maxl(2), Inel(2), maxnorb
     INTEGER, ALLOCATABLE :: nkocc(:,:)
     REAL(DP) :: neltot(2)
-    REAL(DP) :: scl, pnorm, ctemp
+    REAL(DP) :: scl, pnorm, ctemp, emax
     REAL(DP), ALLOCATABLE :: wg_(:,:,:)  ! orbital occupations 
     COMPLEX(DP), ALLOCATABLE :: Orbitals(:,:) 
     COMPLEX(DP), ALLOCATABLE :: Orbs(:,:)  ! old orbitals
@@ -917,26 +917,36 @@ MODULE orbital_generators
         neltot(ispin) = nint(neltot(ispin))
       enddo
       ! step 2: determine integer occupation from eigenvalues
-      allocate( etv(nelmax*nksym) )
-      allocate( idx(nelmax*nksym) )
+      mel = nelmax*nksym
+      allocate( etv(mel) )
+      allocate( idx(mel) )
       do ispin=1,numspin
         ik = nksym*(ispin-1)+1
         ikk = ik+nksym-1
-        etv = reshape(et(:nelmax,ik:ikk), (/nelmax*nksym/))
-        ! argsort(etv)
-        do ia=1,nelmax*nksym
+        ! etv = et.ravel()
+        etv = reshape(et(:nelmax,ik:ikk), (/mel/))
+        ! idx = argsort(etv)
+        do ia=1,mel
           idx(ia) = ia
         enddo
-        call quicksort(etv, 1, nelmax*nksym, idx)
+        call quicksort(etv, 1, mel, idx)
         ! set weights
-        do ia=1,int(neltot(ispin))
+        emax = etv(int(neltot(ispin)))
+        if (lgcocc) emax = gcef_in_ry
+        do ia=1,mel
           ! 1D to 2D index
           j = (idx(ia)-1)/nelmax + 1
           i = idx(ia)-nelmax*(j-1)
           wg_(i, j, ispin) = 1.d0
+          if (etv(ia) > emax) then
+            wg_(i, j, ispin) = 0.d0
+            exit
+          endif
         enddo
+        if (.not.lgcocc) then ! check the number of electrons
         n = sum(wg_(:,:,ispin))
         if (n.ne.neltot(ispin)) call errore('og', 'set weights failed', 1)
+        endif
       enddo
     else ! fractional weight based occupation
     Inel(:) = 0
