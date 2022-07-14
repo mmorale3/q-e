@@ -496,6 +496,8 @@ MODULE moire
   !! variational scaling factor in front of hartree potential
   REAL(DP) :: vx_scale = 1.0_dp
   !! variational scaling factor in front of exchange potential
+  LOGICAL :: lgate_screen
+  REAL(DP) :: dgate
   !
 END MODULE moire
 !

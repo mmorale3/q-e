@@ -194,7 +194,9 @@ SUBROUTINE iosys()
                     vmoire_ => vmoire, &
                     pmoire_ => pmoire, &
                     vh_scale_ => vh_scale, &
-                    vx_scale_ => vx_scale
+                    vx_scale_ => vx_scale, &
+                    lgate_screen_ => lgate_screen, &
+                    dgate_ => dgate
   !
   USE symm_base, ONLY : no_t_rev_ => no_t_rev, nofrac, allfrac, &
                         nosym_ => nosym, nosym_evc_=> nosym_evc
@@ -269,7 +271,7 @@ SUBROUTINE iosys()
                                zgate, relaxz, block, block_1, block_2,        &
                                block_height, lmoire, amoire_in_ang, epsmoire, &
                                mstar, vmoire_in_mev, pmoire_in_deg, vh_scale, &
-                               vx_scale
+                               vx_scale, lgate_screen, dgate
   !
   ! ... ELECTRONS namelist
   !
@@ -694,6 +696,9 @@ SUBROUTINE iosys()
     ! scale Coulomb potential
     vh_scale_ = vh_scale
     vx_scale_ = vx_scale
+    ! screen Coulomb potential
+    lgate_screen_ = lgate_screen
+    dgate_ = dgate
   endif ! lmoire
   !
   ! NONCOLLINEAR MAGNETISM, MAGNETIC CONSTRAINTS

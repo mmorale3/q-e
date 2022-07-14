@@ -665,6 +665,12 @@ MODULE input_parameters
         INTEGER :: no_constrain_type = -1
         !! remove magnetic constraint for atoms of this type
         !
+        LOGICAL :: lgate_screen = .false.
+        !! screen Coulomb potential by gates
+        !
+        REAL(DP) :: dgate = 10.d0
+        !! gate separation in bohr
+        !
 
 
         NAMELIST / system / ibrav, celldm, a, b, c, cosab, cosac, cosbc, nat, &
@@ -701,7 +707,8 @@ MODULE input_parameters
              space_group, uniqueb, origin_choice, rhombohedral,               &
              zgate, relaxz, block, block_1, block_2, block_height,            &
              lmoire, amoire_in_ang, vmoire_in_mev, pmoire_in_deg, mstar,      &
-             epsmoire, vh_scale, vx_scale, no_constrain_type, lmadelung
+             epsmoire, vh_scale, vx_scale, no_constrain_type, lmadelung,      &
+             lgate_screen, dgate
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters

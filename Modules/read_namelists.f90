@@ -854,6 +854,8 @@ MODULE read_namelists_module
        CALL mp_bcast( vx_scale,          ionode_id, intra_image_comm )
        CALL mp_bcast( no_constrain_type, ionode_id, intra_image_comm )
        CALL mp_bcast( lmadelung,         ionode_id, intra_image_comm )
+       CALL mp_bcast( lgate_screen,      ionode_id, intra_image_comm )
+       CALL mp_bcast( dgate,             ionode_id, intra_image_comm )
 
        ! ... EXX
 
