@@ -1032,21 +1032,10 @@ SUBROUTINE get_nelmax(nbnd,nk,ns,wk,n1,wg,nelmax)
   !
   INTEGER :: ispin,ik,ikk,ia
   REAL(DP) :: scl  
-  integer :: neltot(2)
+  integer :: nel1
   !  
-  nelmax = 0
-  if (lsortocc) then ! determine from input
-    neltot(:) = 0
-    neltot(1) = nk*nint(nelec) ! nspin 4
-    if (nspin.eq.1) neltot(1) = neltot(1)/2
-    neltot(1) = neltot(1) + dnup
-    if (nspin.eq.2) then
-      neltot(1) = nk*nint(nelup) + dnup
-      neltot(2) = nk*nint(neldw) + dndn
-    endif
-    nelmax = ceiling(max(neltot(1), neltot(2))*1.d0/nk)
-    if (nelmax>nbnd) call errore('get_nelmax', 'not enough orbitals', 1)
-  else ! determine from fractional weights
+  nelmax = 0 ! maximum number of occupied orbitals over all kpoints
+  ! determine from fractional weights
   do ispin=1,ns
     do ik=1,nk
       ikk = ik + nk*(ispin-1)
@@ -1062,6 +1051,11 @@ SUBROUTINE get_nelmax(nbnd,nk,ns,wk,n1,wg,nelmax)
       enddo
     enddo
   enddo
+  if (lsortocc) then ! determine from input
+    nel1 = nelmax + max(0, dnup, dndn)
+    if (nel1>nbnd) call errore('get_nelmax', 'need more orbitals than bands', 1)
+    if (nel1<nelmax) call errore('get_nelmax', 'fewer orbitals than occupied bands', 1)
+    nelmax = nel1
   endif ! lsortocc
 END SUBROUTINE get_nelmax
 !-----------------------------------------------------------------------
