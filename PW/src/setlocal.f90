@@ -36,7 +36,7 @@ SUBROUTINE setlocal
   USE esm,               ONLY : esm_local, esm_bc, do_comp_esm
   USE qmmm,              ONLY : qmmm_add_esf
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_local 
-  USE moire,             ONLY : lmoire, vmoire, pmoire
+  USE moire,             ONLY : lmoire, vmoire, pmoire, lgate_screen, dgate
   USE input_parameters,  ONLY : vmoire_in_mev
   !
   IMPLICIT NONE
@@ -53,13 +53,17 @@ SUBROUTINE setlocal
   !
   if (lmoire) then
   vltot(:) = 0.d0
+  if (lgate_screen) then
+    write(stdout, '("   screened Hartree interaction by gates at +/-d/2")')
+    write(stdout, '("     d =",f18.8," bohr")') dgate
+  endif
   write(stdout, '("     Vm = ",f18.8," eRy")') vmoire
   if (abs(vmoire) < eps8) then
     write(stdout,*) " no moire potential to add"
     return
   endif
   call hex_shell(g6)
-  write(stdout, '("     Moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
+  write(stdout, '("     moire potential Vm = ",f12.2," meV on G shell:")') vmoire_in_mev
   write(stdout, *) "       cartesian:"
   do iat=1,6
     write(stdout, '("     ",3f11.6)') g6(:,iat)
@@ -89,7 +93,7 @@ SUBROUTINE setlocal
   enddo r_loop
   v_of_0 = sum(vltot)/dfftp%nnr
   call mp_sum(v_of_0, intra_bgrp_comm)
-  write(stdout, '("     Moire V(G=0): ", f11.6, " eha")') v_of_0
+  write(stdout, '("     moire V(G=0): ", f11.6, " eha")') v_of_0
   else ! not lmoire
   ALLOCATE( aux(dfftp%nnr) )
   aux(:) = (0.d0,0.d0)

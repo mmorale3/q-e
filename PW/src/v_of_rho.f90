@@ -535,7 +535,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   USE martyna_tuckerman, ONLY : wg_corr_h, do_comp_mt
   USE esm,               ONLY : do_comp_esm, esm_hartree, esm_bc
   USE Coul_cut_2D,       ONLY : do_cutoff_2D, cutoff_2D, cutoff_hartree  
-  USE moire,             ONLY : lmoire, vh_scale
+  USE moire,             ONLY : lmoire, vh_scale, lgate_screen, dgate
   !
   IMPLICIT NONE
   !
@@ -549,7 +549,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   !
   !  ... local variables
   !
-  REAL(DP)              :: fac
+  REAL(DP)              :: fac, gmag
   REAL(DP), ALLOCATABLE :: aux1(:,:)
   REAL(DP)              :: rgtot_re, rgtot_im, eh_corr
   INTEGER               :: is, ig
@@ -590,7 +590,11 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
            !
            if (lmoire) then
            if (abs(g(3,ig)) > eps8) cycle
-           fac = 1.D0 / sqrt(gg(ig))
+           gmag = sqrt(gg(ig))
+           fac = 1.D0 / gmag
+           if (lgate_screen) then
+             fac = fac*erf(gmag*dgate/2.d0)
+           endif
            else
            fac = 1.D0 / gg(ig) 
            endif ! lmoire
